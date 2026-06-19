@@ -180,7 +180,115 @@ describe('cabtObservationToGameView', () => {
 
     expect(prompt?.message).toBe('Choose energy to discard');
     expect(prompt?.fields.cardList).toEqual([
-      expect.objectContaining({ name: 'Basic {G} Energy', energyType: 1 }),
+      expect.objectContaining({
+        name: 'Basic {G} Energy',
+        energyType: 1,
+        promptLabel: 'P0 Active: Celebi',
+        promptSubLabel: 'HP 80/80 · energy 1/1',
+      }),
+    ]);
+  });
+
+  it('distinguishes duplicate attached energy options by owning Pokemon', () => {
+    const dataMaps: CabtDataMaps = {
+      cardData: {
+        1: {
+          cardId: 1,
+          name: 'Basic {G} Energy',
+          cardType: CabtCardType.BASIC_ENERGY,
+          energyType: 1,
+          set: 'SVE',
+          setNumber: '1',
+        },
+        655: {
+          cardId: 655,
+          name: 'Celebi',
+          cardType: CabtCardType.POKEMON,
+          basic: true,
+          hp: 80,
+        },
+        656: {
+          cardId: 656,
+          name: 'Sprigatito',
+          cardType: CabtCardType.POKEMON,
+          basic: true,
+          hp: 70,
+        },
+      },
+      attacks: {},
+    };
+    const observation = {
+      select: {
+        type: CabtSelectType.CARD,
+        context: CabtSelectContext.DISCARD_ENERGY,
+        minCount: 1,
+        maxCount: 1,
+        remainDamageCounter: 0,
+        remainEnergyCost: 0,
+        option: [
+          { type: CabtOptionType.ENERGY_CARD, area: CabtAreaType.ACTIVE, index: 0, energyIndex: 0, playerIndex: 0 },
+          { type: CabtOptionType.ENERGY_CARD, area: CabtAreaType.BENCH, index: 0, energyIndex: 0, playerIndex: 0 },
+        ],
+        deck: null,
+        contextCard: null,
+        effect: null,
+      },
+      logs: [],
+      current: {
+        turn: 1,
+        turnActionCount: 0,
+        yourIndex: 0,
+        firstPlayer: 1,
+        supporterPlayed: false,
+        stadiumPlayed: false,
+        energyAttached: true,
+        retreated: false,
+        result: -1,
+        stadium: [],
+        looking: null,
+        players: [
+          {
+            ...player(),
+            active: [{
+              id: 655,
+              hp: 50,
+              maxHp: 80,
+              appearThisTurn: false,
+              energies: [1],
+              energyCards: [{ id: 1, serial: 50, playerIndex: 0 }],
+              tools: [],
+              preEvolution: [],
+            }],
+            bench: [{
+              id: 656,
+              hp: 70,
+              maxHp: 70,
+              appearThisTurn: false,
+              energies: [1],
+              energyCards: [{ id: 1, serial: 51, playerIndex: 0 }],
+              tools: [],
+              preEvolution: [],
+            }],
+          },
+          player(),
+        ],
+      },
+    } satisfies CabtObservation;
+
+    const view = cabtObservationToGameView(observation, [], dataMaps);
+    const prompt = view.prompts[0];
+
+    expect(prompt?.fields.cardList).toEqual([
+      expect.objectContaining({
+        name: 'Basic {G} Energy',
+        promptLabel: 'P0 Active: Celebi',
+        promptSubLabel: 'HP 50/80 · 30 damage · energy 1/1',
+      }),
+      expect.objectContaining({
+        name: 'Basic {G} Energy',
+        promptLabel: 'P0 Bench 1: Sprigatito',
+        promptSubLabel: 'HP 70/70 · energy 1/1',
+      }),
     ]);
   });
 

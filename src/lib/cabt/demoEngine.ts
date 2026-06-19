@@ -604,6 +604,7 @@ function buildPrompts(observation: CabtObservation, activePlayerIndex: number, d
             };
             return {
               ...view,
+              ...promptCardMetadata(option, observation, dataMaps),
               index: optionIndex,
             };
           }),
@@ -679,6 +680,10 @@ function promptIdForSelect(select: NonNullable<CabtObservation['select']>) {
       option.area,
       option.index,
       option.playerIndex,
+      option.energyIndex,
+      option.toolIndex,
+      option.inPlayArea,
+      option.inPlayIndex,
       option.attackId,
       option.cardId,
       option.serial,
@@ -808,6 +813,66 @@ function cardForOption(option: CabtOption, observation: CabtObservation, optionI
   if (area === CabtAreaType.BENCH) return attachedCardForOption(player.bench[index], option) ?? player.bench[index] ?? null;
   if (area === CabtAreaType.PRIZE) return player.prize[index] ?? null;
   return null;
+}
+
+function promptCardMetadata(option: CabtOption, observation: CabtObservation, dataMaps: CabtDataMaps) {
+  const source = attachedSourceForOption(option, observation);
+  if (!source) {
+    return {};
+  }
+  const pokemonName = dataMaps.cardData[source.pokemon.id]?.name ?? `Card ${source.pokemon.id}`;
+  const slotName = source.slot === 'active' ? 'Active' : `Bench ${source.index + 1}`;
+  const currentHp = Math.max(0, source.pokemon.hp);
+  const maxHp = Math.max(0, source.pokemon.maxHp);
+  const damage = Math.max(0, maxHp - currentHp);
+  const attachmentParts: string[] = [];
+  if (option.energyIndex !== undefined && option.energyIndex !== null) {
+    attachmentParts.push(`energy ${option.energyIndex + 1}/${Math.max(1, source.pokemon.energyCards.length)}`);
+  }
+  if (option.toolIndex !== undefined && option.toolIndex !== null) {
+    attachmentParts.push(`tool ${option.toolIndex + 1}/${Math.max(1, source.pokemon.tools.length)}`);
+  }
+  return {
+    promptLabel: `P${source.playerIndex} ${slotName}: ${pokemonName}`,
+    promptSubLabel: [
+      maxHp ? `HP ${currentHp}/${maxHp}` : null,
+      damage ? `${damage} damage` : null,
+      ...attachmentParts,
+    ].filter(Boolean).join(' · '),
+  };
+}
+
+function attachedSourceForOption(option: CabtOption, observation: CabtObservation) {
+  const area = option.area;
+  const index = option.index;
+  const current = observation.current;
+  if (
+    !current
+    || (area !== CabtAreaType.ACTIVE && area !== CabtAreaType.BENCH)
+    || index === undefined
+    || index === null
+    || (
+      (option.energyIndex === undefined || option.energyIndex === null)
+      && (option.toolIndex === undefined || option.toolIndex === null)
+    )
+  ) {
+    return null;
+  }
+  const playerIndex = option.playerIndex ?? current.yourIndex;
+  const player = current.players[playerIndex];
+  if (!player) {
+    return null;
+  }
+  const pokemon = area === CabtAreaType.ACTIVE ? player.active[index] : player.bench[index];
+  if (!pokemon) {
+    return null;
+  }
+  return {
+    playerIndex,
+    slot: area === CabtAreaType.ACTIVE ? 'active' as const : 'bench' as const,
+    index,
+    pokemon,
+  };
 }
 
 function attachedCardForOption(pokemonCard: CabtPokemon | null | undefined, option: CabtOption) {

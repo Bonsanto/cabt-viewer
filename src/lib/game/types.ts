@@ -38,6 +38,8 @@ export type CardView = {
   retreat?: unknown[];
   attacks?: AttackView[];
   powers?: PowerView[];
+  promptLabel?: string;
+  promptSubLabel?: string;
 };
 
 export type AttackView = {

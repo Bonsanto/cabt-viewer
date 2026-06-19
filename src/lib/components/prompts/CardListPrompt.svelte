@@ -94,6 +94,8 @@
         selected={selectedIndexes.includes(cardIndex)}
         blocked={!isIndexSelectable(cardIndex)}
         disabled={resolving || !isIndexSelectable(cardIndex)}
+        labelText={card.promptLabel}
+        labelDetail={card.promptSubLabel}
         onclick={() => toggleIndex(cardIndex)}
       >
         <CardTile {card} compact />
