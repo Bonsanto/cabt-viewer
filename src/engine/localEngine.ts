@@ -53,6 +53,43 @@ type AgentManifest = {
   }>;
 };
 
+type HumanTraceRecord = {
+  schemaVersion: 1;
+  kind: 'human_play_trace';
+  traceId: string;
+  createdAt: string;
+  source: {
+    tool: 'cabt-viewer';
+    reviewer: string;
+    runId: string;
+    agentPath?: string;
+  };
+  trust: string;
+  confidence: number;
+  segments: Array<{
+    game: number;
+    turn: number;
+    player: number;
+    turnPlan: string;
+    decisions: Array<Record<string, unknown>>;
+  }>;
+};
+
+type HumanTraceOutcome = {
+  terminal: boolean;
+  result: number | null;
+  turn: number | null;
+  activePlayer: number | null;
+  turnActionIndex: number | null;
+  nextContext: number | null;
+  nextSelectType: number | null;
+  nextMinCount: number | null;
+  nextMaxCount: number | null;
+  nextOptionCount: number;
+};
+
+const TRACE_TRUST_TIERS = new Set(['gold', 'silver', 'bronze', 'debug', 'unreliable']);
+
 const CARD_ROWS = rawCardRows as Array<{
   id: number;
   name: string;
@@ -74,6 +111,7 @@ const BRIDGE_PATH = path.join(FRONTEND_ROOT, 'src', 'engine', 'cabt_bridge.py');
 export class LocalEngineController {
   private readonly demo = new CabtDemoController();
   private readonly bridge: CabtBridgeClient;
+  private readonly traceRecorder = new HumanTraceRecorder();
   private observation: CabtObservation | null = null;
   private dataMaps: CabtDataMaps = { cardData: {}, attacks: {} };
   private logs: LogView[] = [];
@@ -91,7 +129,7 @@ export class LocalEngineController {
     }
 
     try {
-      if (command.type !== 'startGame') {
+      if (command.type !== 'startGame' && command.type !== 'state') {
         this.assertSession(command.payload);
       }
       switch (command.type) {
@@ -100,18 +138,24 @@ export class LocalEngineController {
         case 'state':
           return this.viewResponse();
         case 'playCard':
+          this.assertNoPendingPrompt();
           return await this.selectMatchingOption((option) => this.matchesPlayCardOption(option, command.payload));
         case 'attack':
+          this.assertNoPendingPrompt();
           return await this.selectMatchingOption((option) => this.matchesAttackOption(option, command.payload));
         case 'useAbility':
+          this.assertNoPendingPrompt();
           return await this.selectMatchingOption((option) => this.matchesAbilityOption(option, command.payload));
         case 'useStadium':
+          this.assertNoPendingPrompt();
           return await this.selectMatchingOption((option) => option.area === CabtAreaType.STADIUM);
         case 'concede':
           return { ok: false, error: 'Concede is not exposed by the CABT native engine.', view: this.view() };
         case 'retreat':
+          this.assertNoPendingPrompt();
           return await this.retreat(command.payload);
         case 'passTurn':
+          this.assertNoPendingPrompt();
           return await this.selectMatchingOption((option) => option.type === CabtOptionType.END);
         case 'resolvePrompt':
           return await this.applySelection(this.normalizePromptSelection(command.payload?.result));
@@ -161,6 +205,7 @@ export class LocalEngineController {
       agentPath,
     }, { allowStart: true });
     this.applyBridgeResponse(response);
+    this.traceRecorder.start(this.sessionId, agentPath);
     this.logs = [{ id: this.logId++, message: `Started real CABT match${agentPath ? ` against ${agentPath}` : ''}.` }];
     return this.viewResponse();
   }
@@ -201,11 +246,14 @@ export class LocalEngineController {
     if (selection.length < select.minCount || selection.length > select.maxCount) {
       throw new Error(`Selection must contain ${select.minCount}-${select.maxCount} option(s).`);
     }
+    validateSelectionIndexes(select, selection);
+    const traceStep = this.traceRecorder.record(this.observation, selection);
     const response = await this.bridge.request({
       command: 'select',
       selection,
     });
     this.applyBridgeResponse(response);
+    this.traceRecorder.recordOutcome(traceStep, this.observation);
     await this.applyPendingRetreatTarget();
     return this.viewResponse();
   }
@@ -214,6 +262,7 @@ export class LocalEngineController {
     return selection.length > select.maxCount
       && select.maxCount === 1
       && (select.context === CabtSelectContext.DISCARD_ENERGY || select.context === CabtSelectContext.DISCARD_ENERGY_CARD)
+      && new Set(selection).size === selection.length
       && selection.every((index) => Number.isInteger(index) && index >= 0 && index < select.option.length);
   }
 
@@ -232,11 +281,13 @@ export class LocalEngineController {
       if (optionIndex < 0) {
         break;
       }
+      const traceStep = this.traceRecorder.record(this.observation, [optionIndex]);
       const response = await this.bridge.request({
         command: 'select',
         selection: [optionIndex],
       });
       this.applyBridgeResponse(response);
+      this.traceRecorder.recordOutcome(traceStep, this.observation);
     }
     await this.applyPendingRetreatTarget();
     return this.viewResponse();
@@ -301,11 +352,13 @@ export class LocalEngineController {
     }
 
     this.pendingRetreatTarget = null;
+    const traceStep = this.traceRecorder.record(this.observation, [targetIndex]);
     const response = await this.bridge.request({
       command: 'select',
       selection: [targetIndex],
     });
     this.applyBridgeResponse(response);
+    this.traceRecorder.recordOutcome(traceStep, this.observation);
   }
 
   private findPendingRetreatTargetOption(): number {
@@ -338,7 +391,14 @@ export class LocalEngineController {
   }
 
   private view() {
-    return cabtObservationToGameView(this.observation, this.logs, this.dataMaps);
+    const view = cabtObservationToGameView(this.observation, this.logs, this.dataMaps);
+    return {
+      ...view,
+      capabilities: {
+        ...view.capabilities,
+        concede: false,
+      },
+    };
   }
 
   private matchesPlayCardOption(option: CabtOption, payload: any): boolean {
@@ -449,11 +509,147 @@ export class LocalEngineController {
     }
   }
 
+  private assertNoPendingPrompt(): void {
+    const context = this.observation?.select?.context;
+    if (context !== undefined && context !== null && context !== CabtSelectContext.MAIN) {
+      throw new Error('Resolve the current CABT prompt before taking another action.');
+    }
+  }
+
   private invalidateSession(message: string): void {
     this.sessionId = '';
     this.observation = null;
     this.pendingRetreatTarget = null;
+    this.traceRecorder.close();
     this.logs = [...this.logs, { id: this.logId++, message }];
+  }
+}
+
+class HumanTraceRecorder {
+  private trace: HumanTraceRecord | null = null;
+  private filePath = '';
+  private decisionCount = 0;
+
+  start(sessionId: string, agentPath?: string): void {
+    this.close();
+    if (!traceEnabled()) {
+      return;
+    }
+    try {
+      const traceId = `cabt-${sessionId}`;
+      this.filePath = path.join(traceDirectory(), `${sanitizeFileName(traceId)}.jsonl`);
+      this.decisionCount = 0;
+      this.trace = {
+        schemaVersion: 1,
+        kind: 'human_play_trace',
+        traceId,
+        createdAt: new Date().toISOString(),
+        source: {
+          tool: 'cabt-viewer',
+          reviewer: process.env.CABT_TRACE_REVIEWER || 'local-reviewer',
+          runId: traceId,
+          ...(agentPath ? { agentPath } : {}),
+        },
+        trust: traceTrust(),
+        confidence: traceConfidence(),
+        segments: [],
+      };
+    } catch {
+      this.close();
+    }
+  }
+
+  record(observation: CabtObservation | null, selection: number[]): number | null {
+    if (!this.trace || !observation?.select || !observation.current) {
+      return null;
+    }
+    try {
+      const select = observation.select;
+      validateSelectionIndexes(select, selection);
+      const current = observation.current;
+      const turn = Number.isInteger(current.turn) ? current.turn : 0;
+      const player = Number.isInteger(current.yourIndex) ? current.yourIndex : 0;
+      const legalOptionIndexes = select.option.map((_option, index) => index);
+      const chosenAction = selection.filter((index) => Number.isInteger(index) && index >= 0);
+      const segment = this.segmentFor(turn, player);
+      const step = this.decisionCount;
+      segment.decisions.push({
+        step,
+        activePlayer: player,
+        turnActionIndex: Number.isInteger(current.turnActionCount) ? current.turnActionCount : this.decisionCount,
+        context: select.context,
+        selectType: select.type,
+        minCount: select.minCount,
+        maxCount: select.maxCount,
+        legalOptionIndexes,
+        legalOptionIds: legalOptionIndexes.map((index) => `select:${index}`),
+        legalOptions: select.option.map((option, index) => ({ optionIndex: index, ...jsonClone(option) })),
+        chosenAction,
+        observation: jsonClone(observation),
+      });
+      this.decisionCount += 1;
+      this.write();
+      return step;
+    } catch {
+      this.close();
+      return null;
+    }
+  }
+
+  recordOutcome(step: number | null, observation: CabtObservation | null): void {
+    if (!this.trace || step === null) {
+      return;
+    }
+    try {
+      const decision = this.findDecision(step);
+      if (!decision) {
+        return;
+      }
+      decision.outcome = outcomeForObservation(observation);
+      this.write();
+    } catch {
+      this.close();
+    }
+  }
+
+  close(): void {
+    this.trace = null;
+    this.filePath = '';
+    this.decisionCount = 0;
+  }
+
+  private segmentFor(turn: number, player: number): HumanTraceRecord['segments'][number] {
+    const current = this.trace?.segments.at(-1);
+    if (current && current.turn === turn && current.player === player) {
+      return current;
+    }
+    const next = {
+      game: 0,
+      turn,
+      player,
+      turnPlan: 'human-vs-ai local play',
+      decisions: [],
+    };
+    this.trace?.segments.push(next);
+    return next;
+  }
+
+  private write(): void {
+    if (!this.trace || !this.filePath || this.trace.segments.length === 0) {
+      return;
+    }
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+    fs.writeFileSync(this.filePath, `${JSON.stringify(this.trace)}\n`, 'utf8');
+  }
+
+  private findDecision(step: number): Record<string, unknown> | undefined {
+    for (const segment of this.trace?.segments ?? []) {
+      const decision = segment.decisions.find((item) => item.step === step);
+      if (decision) {
+        return decision;
+      }
+    }
+    return undefined;
   }
 }
 
@@ -592,6 +788,74 @@ function bridgeProcessCommand(): { command: string; args: string[] } {
 
 function toPosixPath(value: string): string {
   return value.split(path.sep).join('/');
+}
+
+function traceEnabled(): boolean {
+  return process.env.CABT_TRACE_ENABLED !== '0';
+}
+
+function traceDirectory(): string {
+  if (process.env.CABT_TRACE_DIR) {
+    return privateTraceDirectory(path.resolve(process.env.CABT_TRACE_DIR));
+  }
+  return privateTraceDirectory(path.join(WORKSPACE_ROOT, 'ptcg-kaggle', 'private', 'traces'));
+}
+
+function privateTraceDirectory(directory: string): string {
+  const resolved = path.resolve(directory);
+  const parts = resolved.split(path.sep);
+  if (!parts.includes('private') && !parts.includes('outputs')) {
+    throw new Error(`CABT_TRACE_DIR must point under a private/ or outputs/ directory: ${resolved}`);
+  }
+  return resolved;
+}
+
+function traceTrust(): string {
+  const trust = process.env.CABT_TRACE_TRUST || 'silver';
+  return TRACE_TRUST_TIERS.has(trust) ? trust : 'silver';
+}
+
+function traceConfidence(): number {
+  const raw = Number(process.env.CABT_TRACE_CONFIDENCE ?? 4);
+  if (!Number.isFinite(raw)) {
+    return 4;
+  }
+  return Math.max(1, Math.min(5, Math.round(raw)));
+}
+
+function sanitizeFileName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function jsonClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function outcomeForObservation(observation: CabtObservation | null): HumanTraceOutcome {
+  const current = observation?.current;
+  const select = observation?.select;
+  const result = Number.isInteger(current?.result) ? current!.result : null;
+  return {
+    terminal: result !== null && result >= 0,
+    result,
+    turn: Number.isInteger(current?.turn) ? current!.turn : null,
+    activePlayer: Number.isInteger(current?.yourIndex) ? current!.yourIndex : null,
+    turnActionIndex: Number.isInteger(current?.turnActionCount) ? current!.turnActionCount : null,
+    nextContext: Number.isInteger(select?.context) ? select!.context : null,
+    nextSelectType: Number.isInteger(select?.type) ? select!.type : null,
+    nextMinCount: Number.isInteger(select?.minCount) ? select!.minCount : null,
+    nextMaxCount: Number.isInteger(select?.maxCount) ? select!.maxCount : null,
+    nextOptionCount: Array.isArray(select?.option) ? select!.option.length : 0,
+  };
+}
+
+function validateSelectionIndexes(select: CabtSelectData, selection: number[]): void {
+  if (selection.some((index) => !Number.isInteger(index) || index < 0 || index >= select.option.length)) {
+    throw new Error('Selection contains an option index outside the current CABT select options.');
+  }
+  if (new Set(selection).size !== selection.length) {
+    throw new Error('Selection must not contain duplicate option indexes.');
+  }
 }
 
 function createSessionId(): string {

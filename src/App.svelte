@@ -429,7 +429,7 @@
   }
 
   async function playToTarget(target: CardTarget) {
-    if (!selectedHand || !game || !canAct(selectedHand.playerIndex)) {
+    if (currentPrompt || !selectedHand || !game || !canAct(selectedHand.playerIndex)) {
       return;
     }
     await gameSessionStore.run(() => commandApi.playCard(selectedHand!.playerIndex, selectedHand!.handIndex, target));
@@ -693,7 +693,7 @@
   }
 
   function playSelectedToBoard() {
-    if (!game || !activePlayer || !canPlayToArea(activePlayer)) {
+    if (currentPrompt || !game || !activePlayer || !canPlayToArea(activePlayer)) {
       return;
     }
     void playToTarget(targetFor(game.activePlayerIndex, game.activePlayerIndex, SlotType.ACTIVE));
@@ -978,6 +978,7 @@
         busy={sessionBusy}
         promptActive={replayMode || !!currentPrompt}
         {gameFinished}
+        canConcede={game.capabilities?.concede !== false}
         {error}
         {resetPerspective}
         {passTurn}

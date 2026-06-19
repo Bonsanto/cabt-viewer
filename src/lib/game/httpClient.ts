@@ -9,9 +9,57 @@ type Command = {
 
 type AvailableActionsScope = 'none' | 'active' | 'full';
 
-let currentSessionId = '';
+const LOCAL_SESSION_STORAGE_KEY = 'cabt.localSessionId';
+
+let currentSessionId = readStoredSessionId();
+
+function readStoredSessionId(): string {
+  try {
+    return globalThis.sessionStorage?.getItem(LOCAL_SESSION_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function storeSessionId(sessionId: string): void {
+  currentSessionId = sessionId;
+  try {
+    globalThis.sessionStorage?.setItem(LOCAL_SESSION_STORAGE_KEY, sessionId);
+  } catch {
+    // Ignore storage failures; the in-memory session id is enough until reload.
+  }
+}
+
+function clearSessionId(): void {
+  currentSessionId = '';
+  try {
+    globalThis.sessionStorage?.removeItem(LOCAL_SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+async function recoverCurrentSession(): Promise<void> {
+  if (currentSessionId) {
+    return;
+  }
+  const response = await fetch('/local-engine', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ type: 'state' }),
+  });
+  const body = await response.json() as EngineResponse;
+  if (body.ok && body.sessionId) {
+    storeSessionId(body.sessionId);
+  }
+}
 
 async function send(command: Command): Promise<EngineResponse> {
+  if (command.type !== 'startGame' && command.type !== 'state' && !currentSessionId) {
+    await recoverCurrentSession();
+  }
   const commandWithSession = command.type === 'startGame' || !currentSessionId
     ? command
     : {
@@ -30,11 +78,15 @@ async function send(command: Command): Promise<EngineResponse> {
   });
   const body = await response.json() as EngineResponse;
   if (body.ok && body.sessionId) {
-    currentSessionId = body.sessionId;
+    storeSessionId(body.sessionId);
   } else if (!body.ok && body.error.includes('session')) {
-    currentSessionId = '';
+    clearSessionId();
   }
   return body;
+}
+
+export function resetLocalSessionForTests(): void {
+  clearSessionId();
 }
 
 export function hostedAvailableActionsScope(command: Command): AvailableActionsScope | undefined {

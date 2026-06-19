@@ -16,6 +16,7 @@
     busy?: boolean;
     promptActive?: boolean;
     gameFinished?: boolean;
+    canConcede?: boolean;
     error?: string;
     resetPerspective: () => void;
     passTurn: () => void;
@@ -39,6 +40,7 @@
     busy = false,
     promptActive = false,
     gameFinished = false,
+    canConcede = true,
     error = '',
     resetPerspective,
     passTurn,
@@ -84,7 +86,14 @@
   </label>
   <div class="sidebar-turn-actions">
     <button disabled={busy || promptActive || gameFinished} onclick={passTurn}>Pass turn</button>
-    <button class="danger" disabled={busy || promptActive || gameFinished} onclick={concede}>Concede</button>
+    <button
+      class="danger"
+      disabled={busy || promptActive || gameFinished || !canConcede}
+      title={!canConcede ? 'Concede is unavailable in CABT-native games.' : undefined}
+      onclick={concede}
+    >
+      Concede
+    </button>
   </div>
   <button disabled={switchDisabled} onclick={switchSides}>Switch sides</button>
   <button onclick={resetGame}>{resetLabel}</button>

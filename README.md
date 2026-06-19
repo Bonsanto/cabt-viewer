@@ -88,6 +88,40 @@ the replay viewer or set `CABT_ENGINE_MODE=demo` before running `npm run dev`.
 Dev servers bind to `127.0.0.1` by default. To test from another device on your
 LAN, run `npm run dev:lan`.
 
+## Record Private Human Traces
+
+Local play writes full human decision traces by default. From a sibling checkout
+under `Projects/`, traces are saved to:
+
+```text
+../ptcg-kaggle/private/traces/cabt-<session>.jsonl
+```
+
+Each trace contains the pre-action CABT observation, legal select options, and
+the chosen option indexes. Keep these files private; they may contain
+competition data and full game state.
+
+Useful environment variables:
+
+```bash
+export CABT_SAMPLE_SUBMISSION_DIR=/absolute/path/to/sample_submission
+export CABT_TRACE_DIR=/absolute/path/to/ptcg-kaggle/private/traces
+export CABT_TRACE_REVIEWER=local-reviewer
+npm run dev
+```
+
+Set `CABT_TRACE_ENABLED=0` to disable trace writing.
+`CABT_TRACE_DIR` must point under a `private/` or `outputs/` directory.
+`CABT_TRACE_TRUST` must be one of `gold`, `silver`, `bronze`, `debug`, or
+`unreliable`; invalid values fall back to `silver`.
+
+Validate a trace from the Kaggle project:
+
+```bash
+cd /absolute/path/to/ptcg-kaggle
+python3 scripts/human_trace_schema.py private/traces/<trace-file>.jsonl
+```
+
 ## Regenerate CABT Metadata
 
 Generated metadata is committed in `src/lib/cabt` so a fresh clone can show

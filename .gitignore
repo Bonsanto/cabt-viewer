@@ -5,5 +5,10 @@ node_modules
 *.tsbuildinfo
 .env
 .DS_Store
+.idea/
+__pycache__/
+*.pyc
+private/
+outputs/
 sample_submission
 data

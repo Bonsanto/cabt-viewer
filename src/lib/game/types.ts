@@ -146,6 +146,9 @@ export type GameView = {
   prompts: PromptView[];
   logs: LogView[];
   events: unknown[];
+  capabilities?: {
+    concede?: boolean;
+  };
 };
 
 export type EngineOk = {
