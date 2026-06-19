@@ -43,13 +43,23 @@ const customEnergyIcons: Record<string, string> = {
 };
 
 export function energyIconSrc(card: { name?: string; fullName?: string; energyType?: string | number }): string {
-  const name = card.name || card.fullName || '';
-  if (customEnergyIcons[name]) {
-    return customEnergyIcons[name];
+  const custom = customEnergyIconSrc(card);
+  if (custom) {
+    return custom;
   }
-  const basic = basicEnergyIcons.find(([pattern]) => pattern.test(name));
-  const type = basic?.[1] ?? normalizedTypeName(card.energyType);
+  const type = energyIconType(card);
   return type ? `/assets/energy-icons/${type}.webp` : '/assets/energy-icons/colorless.webp';
+}
+
+export function energyIconType(card: { name?: string; fullName?: string; energyType?: string | number }): string | undefined {
+  const name = card.name || card.fullName || '';
+  const basic = basicEnergyIcons.find(([pattern]) => pattern.test(name));
+  return basic?.[1] ?? normalizedTypeName(card.energyType);
+}
+
+function customEnergyIconSrc(card: { name?: string; fullName?: string }): string | undefined {
+  const name = card.name || card.fullName || '';
+  return customEnergyIcons[name];
 }
 
 export function normalizedTypeName(cardType: string | number | undefined): string | undefined {

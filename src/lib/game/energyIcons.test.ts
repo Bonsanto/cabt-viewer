@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { energyIconSrc, normalizedTypeName, pokemonTypeIconSrc, pokemonTypeLabelFor } from './energyIcons';
+import { energyIconSrc, energyIconType, normalizedTypeName, pokemonTypeIconSrc, pokemonTypeLabelFor } from './energyIcons';
 
 describe('energy and Pokemon type icon helpers', () => {
   it('resolves custom energy artwork before basic regex fallbacks', () => {
@@ -11,6 +11,13 @@ describe('energy and Pokemon type icon helpers', () => {
     expect(energyIconSrc({ name: 'Basic {G} Energy' })).toBe('/assets/energy-icons/grass.webp');
     expect(energyIconSrc({ name: 'Basic Energy', energyType: 1 })).toBe('/assets/energy-icons/grass.webp');
     expect(energyIconSrc({ name: 'Unknown Special Energy' })).toBe('/assets/energy-icons/colorless.webp');
+  });
+
+  it('exposes basic energy type names for contrast styling', () => {
+    expect(energyIconType({ name: 'Basic {D} Energy' })).toBe('darkness');
+    expect(energyIconType({ name: 'Basic Dark Energy' })).toBe('darkness');
+    expect(energyIconType({ name: 'Basic Energy', energyType: 7 })).toBe('darkness');
+    expect(energyIconType({ name: 'Double Turbo Energy' })).toBeUndefined();
   });
 
   it('normalizes card type values for Pokemon badges', () => {

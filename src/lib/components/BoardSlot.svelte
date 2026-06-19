@@ -1,6 +1,6 @@
 <script lang="ts">
   import CardTile from './CardTile.svelte';
-  import { energyIconSrc, pokemonTypeIconSrc, pokemonTypeLabelFor } from '../game/energyIcons';
+  import { energyIconSrc, energyIconType, pokemonTypeIconSrc, pokemonTypeLabelFor } from '../game/energyIcons';
   import { remainingHp } from '../game/hpDisplay';
   import type { PokemonSlotView } from '../game/types';
 
@@ -71,6 +71,10 @@
 
   function hasPendingAttach(card: { pendingAttach?: unknown }) {
     return card.pendingAttach === true;
+  }
+
+  function energyTypeClass(card: { name?: string; fullName?: string; energyType?: string | number }) {
+    return `energy-${energyIconType(card) ?? 'unknown'}`;
   }
 
   function attachedEnergyTitle() {
@@ -151,12 +155,16 @@
         <span class="energy-count" aria-hidden="true">{slot.energy.length}<span>E</span></span>
         <span class="energy-icon-row">
           {#each slot.energy as energy, energyIndex}
-            <img
-              src={energyIconSrc(energy)}
-              alt={energy.name || 'Energy'}
+            <span
+              class={`energy-icon-shell ${energyTypeClass(energy)}`}
               class:pending-energy={hasPendingAttach(energy)}
               style={energyStackStyle(energyIndex)}
-            />
+            >
+              <img
+                src={energyIconSrc(energy)}
+                alt={energy.name || 'Energy'}
+              />
+            </span>
           {/each}
         </span>
       </div>
@@ -469,10 +477,34 @@
     gap: var(--energy-gap);
   }
 
-  .energy-rail img {
+  .energy-icon-shell {
+    position: relative;
     flex: 0 0 var(--energy-icon-size);
     width: var(--energy-icon-size);
     height: var(--energy-icon-size);
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+  }
+
+  .energy-icon-shell.energy-darkness::after {
+    content: '';
+    position: absolute;
+    inset: clamp(2px, calc(var(--energy-icon-size) * 0.15), 3px);
+    z-index: 2;
+    border-radius: 999px;
+    border: 1.5px solid rgba(255, 255, 255, 0.94);
+    box-shadow:
+      0 0 0 1px rgba(15, 23, 42, 0.42),
+      0 0 5px rgba(255, 255, 255, 0.62);
+    pointer-events: none;
+  }
+
+  .energy-rail img {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
     border-radius: 999px;
     object-fit: contain;
     filter:
@@ -480,7 +512,7 @@
       drop-shadow(0 3px 4px rgba(23, 30, 38, 0.32));
   }
 
-  .energy-rail img.pending-energy {
+  .energy-icon-shell.pending-energy {
     opacity: 0.5;
   }
 
@@ -490,7 +522,7 @@
     display: block;
   }
 
-  .energy-rail.stacked-energy img {
+  .energy-rail.stacked-energy .energy-icon-shell {
     position: absolute;
     left: var(--energy-offset);
     bottom: 0;
