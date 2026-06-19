@@ -55,6 +55,30 @@ describe('board interaction strategies', () => {
     expect(resolved).toEqual([[0, 0, 0, 1]]);
   });
 
+  it('returns one option index when a CABT prompt applies a whole damage chunk per click', () => {
+    const game = gameView();
+    const bench = targetFor(0, 1, SlotType.BENCH, 0);
+    const prompt = promptView('PutDamagePrompt', {
+      damage: 30,
+      targets: [bench],
+      optionIndexesByTarget: [
+        { target: bench, optionIndex: 1 },
+      ],
+      options: { min: 1, max: 1, damageMultiple: 30 },
+    });
+    prompt.resultSchema = 'optionIndexes';
+    const store = new DamageStore();
+    const resolved: unknown[] = [];
+    const strategy = createPutDamageStrategy({ game, prompt, store, resolve: (value) => resolved.push(value) });
+
+    strategy.activate(bench);
+    expect(strategy.deltaFor(bench)).toBe(30);
+    expect(strategy.meta).toEqual({ current: 30, max: 30, secondary: undefined });
+
+    strategy.confirm();
+    expect(resolved).toEqual([[1]]);
+  });
+
   it('resolves single-target ChoosePokemonPrompt selections immediately', () => {
     const game = gameView();
     const prompt = promptView('ChoosePokemonPrompt', { options: { max: 1 } });

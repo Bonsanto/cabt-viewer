@@ -13,6 +13,7 @@ import {
 } from '../game/types';
 import {
   CabtAreaType,
+  CabtLogType,
   CabtOptionType,
   CabtSelectContext,
   CabtSelectType,
@@ -558,10 +559,10 @@ function buildPrompts(observation: CabtObservation, activePlayerIndex: number, d
   if (!select || select.type === CabtSelectType.MAIN) {
     return [];
   }
-  const id = promptIdForSelect(select);
+  const id = promptIdForSelect(select, observation);
   if (isDamageCounterPrompt(select, observation, activePlayerIndex)) {
     const targets = optionTargetsForSelect(select, observation, activePlayerIndex);
-    const counters = damageCounterCount(select);
+    const damageConfig = damageCounterPromptConfig(select, observation);
     return [
       {
         id,
@@ -575,11 +576,11 @@ function buildPrompts(observation: CabtObservation, activePlayerIndex: number, d
         fields: {
           targets: targets.map((item) => item.target),
           optionIndexesByTarget: targets,
-          damage: counters * 10,
+          damage: damageConfig.damage,
           options: {
-            min: counters,
-            max: counters,
-            damageMultiple: 10,
+            min: damageConfig.min,
+            max: damageConfig.max,
+            damageMultiple: damageConfig.damageMultiple,
           },
           cabtSelect: select,
         },
@@ -696,7 +697,7 @@ function isCardSelectionPrompt(observation: CabtObservation) {
   return select.option.some((option, optionIndex) => option.type === CabtOptionType.CARD || !!cardForOption(option, observation, optionIndex));
 }
 
-function promptIdForSelect(select: NonNullable<CabtObservation['select']>) {
+function promptIdForSelect(select: NonNullable<CabtObservation['select']>, observation?: CabtObservation) {
   return hashPromptKey(JSON.stringify({
     context: select.context,
     type: select.type,
@@ -704,6 +705,7 @@ function promptIdForSelect(select: NonNullable<CabtObservation['select']>) {
     max: select.maxCount,
     remainDamageCounter: select.remainDamageCounter,
     remainEnergyCost: select.remainEnergyCost,
+    damageFromLog: damageCounterDamageFromLogs(select, observation),
     options: select.option.map((option) => [
       option.type,
       option.area,
@@ -734,12 +736,63 @@ function isDamageCounterPrompt(select: CabtSelectData, observation: CabtObservat
     && optionTargetsForSelect(select, observation, activePlayerIndex).length > 0;
 }
 
-function damageCounterCount(select: CabtSelectData) {
+function damageCounterPromptConfig(select: CabtSelectData, observation: CabtObservation) {
+  const remainingCounters = remainingDamageCounterCount(select);
+  if (remainingCounters) {
+    return {
+      damage: remainingCounters * 10,
+      min: remainingCounters,
+      max: remainingCounters,
+      damageMultiple: 10,
+    };
+  }
+
+  const damageFromLog = damageCounterDamageFromLogs(select, observation);
+  if (damageFromLog) {
+    return {
+      damage: damageFromLog,
+      min: 1,
+      max: 1,
+      damageMultiple: damageFromLog,
+    };
+  }
+
+  const counters = Math.max(1, select.maxCount, select.minCount);
+  return {
+    damage: counters * 10,
+    min: counters,
+    max: counters,
+    damageMultiple: 10,
+  };
+}
+
+function remainingDamageCounterCount(select: CabtSelectData) {
   const remain = Number(select.remainDamageCounter);
   if (Number.isFinite(remain) && remain > 0) {
     return Math.floor(remain);
   }
-  return Math.max(1, select.maxCount, select.minCount);
+  return 0;
+}
+
+function damageCounterDamageFromLogs(select: CabtSelectData, observation?: CabtObservation) {
+  if (select.context !== CabtSelectContext.DAMAGE_COUNTER || !observation?.logs?.length) {
+    return 0;
+  }
+  for (let index = observation.logs.length - 1; index >= 0; index -= 1) {
+    const log = observation.logs[index];
+    if (Number(log.type) !== CabtLogType.HP_CHANGE || log.putDamageCounter === true) {
+      continue;
+    }
+    const damage = Math.abs(Number(log.value));
+    if (!Number.isFinite(damage) || damage <= 0) {
+      continue;
+    }
+    const counters = Math.floor(damage / 10);
+    if (counters > 0) {
+      return counters * 10;
+    }
+  }
+  return 0;
 }
 
 function optionTargetsForSelect(select: CabtSelectData, observation: CabtObservation, activePlayerIndex: number) {

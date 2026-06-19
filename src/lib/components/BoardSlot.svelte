@@ -490,13 +490,14 @@
   .energy-icon-shell.energy-darkness::after {
     content: '';
     position: absolute;
-    inset: clamp(2px, calc(var(--energy-icon-size) * 0.15), 3px);
+    inset: 0;
     z-index: 2;
     border-radius: 999px;
-    border: 1.5px solid rgba(255, 255, 255, 0.94);
+    border: 1.5px solid rgba(255, 255, 255, 0.96);
     box-shadow:
-      0 0 0 1px rgba(15, 23, 42, 0.42),
-      0 0 5px rgba(255, 255, 255, 0.62);
+      inset 0 0 0 1px rgba(15, 23, 42, 0.48),
+      0 0 0 1px rgba(255, 255, 255, 0.42),
+      0 0 6px rgba(255, 255, 255, 0.58);
     pointer-events: none;
   }
 
