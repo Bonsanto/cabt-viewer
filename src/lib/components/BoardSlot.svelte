@@ -43,6 +43,7 @@
   let failedToolImageUrl = $state('');
   let lastToolImageUrl = $state<string | undefined>();
   let showToolImage = $derived(!!toolPreviewImageUrl && failedToolImageUrl !== toolPreviewImageUrl);
+  let energyTitle = $derived(attachedEnergyTitle());
 
   $effect(() => {
     if (toolPreviewImageUrl !== lastToolImageUrl) {
@@ -63,6 +64,14 @@
 
   function hasPendingAttach(card: { pendingAttach?: unknown }) {
     return card.pendingAttach === true;
+  }
+
+  function attachedEnergyTitle() {
+    if (!slot.energy.length) {
+      return '';
+    }
+    const names = slot.energy.map((energy) => energy.fullName || energy.name || 'Energy');
+    return `${slot.energy.length} attached energy: ${names.join(', ')}`;
   }
 
   function pokemonHp(card: { hp?: unknown } | undefined) {
@@ -113,15 +122,18 @@
       </div>
     {/if}
     {#if slot.energy.length}
-      <div class="energy-badges" class:stacked-energy={stackedEnergy} title={`${slot.energy.length} attached energy`}>
-        {#each slot.energy as energy, energyIndex}
-          <img
-            src={energyIconSrc(energy)}
-            alt={energy.name || 'Energy'}
-            class:pending-energy={hasPendingAttach(energy)}
-            style={energyStackStyle(energyIndex)}
-          />
-        {/each}
+      <div class="energy-rail" class:stacked-energy={stackedEnergy} title={energyTitle} aria-label={energyTitle}>
+        <span class="energy-count" aria-hidden="true">{slot.energy.length}<span>E</span></span>
+        <span class="energy-icon-row">
+          {#each slot.energy as energy, energyIndex}
+            <img
+              src={energyIconSrc(energy)}
+              alt={energy.name || 'Energy'}
+              class:pending-energy={hasPendingAttach(energy)}
+              style={energyStackStyle(energyIndex)}
+            />
+          {/each}
+        </span>
       </div>
     {/if}
     {#if slot.tools.length}
@@ -306,39 +318,103 @@
     filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.28));
   }
 
-  .energy-badges {
+  .energy-rail {
     --energy-gap: clamp(2px, calc(var(--slot-card-w) * 0.018), 3px);
-    --energy-icon-size: calc((var(--slot-card-w) - (var(--energy-gap) * 3)) / 4);
+    --energy-icon-size: clamp(13px, calc(var(--slot-card-w) * 0.16), 22px);
     position: absolute;
-    left: 0;
-    bottom: calc(var(--slot-card-w) * -0.095);
-    z-index: 5;
-    width: 100%;
-    min-height: var(--energy-icon-size);
+    left: 50%;
+    bottom: calc(var(--slot-card-w) * -0.115);
+    z-index: 8;
+    width: calc(100% + 8px);
+    min-height: calc(var(--energy-icon-size) + 5px);
+    padding: 2px 4px 2px 3px;
+    border: 1px solid rgba(241, 245, 249, 0.72);
+    border-radius: 999px;
+    background: rgba(17, 24, 39, 0.88);
+    box-shadow:
+      0 5px 12px rgba(15, 23, 42, 0.36),
+      inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    color: #f8fafc;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: var(--energy-gap);
+    transform: translateX(-50%);
     pointer-events: none;
   }
 
-  .energy-badges img {
+  .energy-rail::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -6px;
+    width: 2px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(248, 250, 252, 0.82);
+    transform: translateX(-50%);
+  }
+
+  .board-slot.prompt-selectable .energy-rail,
+  .board-slot.prompt-selected .energy-rail {
+    border-color: rgba(167, 243, 208, 0.95);
+    background: rgba(6, 78, 59, 0.92);
+    box-shadow:
+      0 0 0 1px rgba(167, 243, 208, 0.36),
+      0 8px 16px rgba(4, 47, 46, 0.38);
+  }
+
+  .energy-count {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 1px;
+    min-width: clamp(20px, calc(var(--slot-card-w) * 0.2), 28px);
+    justify-content: center;
+    font-size: clamp(11px, calc(var(--slot-card-w) * 0.12), 16px);
+    font-weight: 950;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+
+  .energy-count span {
+    font-size: 0.68em;
+    font-weight: 900;
+    opacity: 0.82;
+  }
+
+  .energy-icon-row {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--energy-gap);
+  }
+
+  .energy-rail img {
     flex: 0 0 var(--energy-icon-size);
     width: var(--energy-icon-size);
     height: var(--energy-icon-size);
     border-radius: 999px;
     object-fit: contain;
-    filter: drop-shadow(0 3px 4px rgba(23, 30, 38, 0.38));
+    filter:
+      drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45))
+      drop-shadow(0 3px 4px rgba(23, 30, 38, 0.32));
   }
 
-  .energy-badges img.pending-energy {
+  .energy-rail img.pending-energy {
     opacity: 0.5;
   }
 
-  .energy-badges.stacked-energy {
+  .energy-rail.stacked-energy .energy-icon-row {
+    min-width: calc(var(--energy-icon-size) * 2.7);
+    height: var(--energy-icon-size);
     display: block;
   }
 
-  .energy-badges.stacked-energy img {
+  .energy-rail.stacked-energy img {
     position: absolute;
     left: var(--energy-offset);
     bottom: 0;

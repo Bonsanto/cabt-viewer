@@ -139,10 +139,14 @@
     transform: rotate(180deg);
   }
 
-  .active-duel :global(.top-active-slot .energy-badges) {
-    inset: calc(var(--slot-card-w) * -0.095) 0 auto auto;
-    justify-content: flex-end;
-    transform: rotate(180deg);
+  .active-duel :global(.top-active-slot .energy-rail) {
+    inset: calc(var(--slot-card-w) * -0.115) auto auto 50%;
+    transform: translateX(-50%);
+  }
+
+  .active-duel :global(.top-active-slot .energy-rail::before) {
+    top: auto;
+    bottom: -6px;
   }
 
   .active-duel :global(.top-active-slot .tool-card-preview) {

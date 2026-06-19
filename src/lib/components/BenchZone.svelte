@@ -176,10 +176,14 @@
     transform: rotate(180deg);
   }
 
-  .bench-row.opponent :global(.energy-badges) {
-    inset: calc(var(--slot-card-w) * -0.095) 0 auto auto;
-    justify-content: flex-end;
-    transform: rotate(180deg);
+  .bench-row.opponent :global(.energy-rail) {
+    inset: calc(var(--slot-card-w) * -0.115) auto auto 50%;
+    transform: translateX(-50%);
+  }
+
+  .bench-row.opponent :global(.energy-rail::before) {
+    top: auto;
+    bottom: -6px;
   }
 
   .bench-row.opponent :global(.tool-card-preview) {
