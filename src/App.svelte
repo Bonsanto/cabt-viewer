@@ -206,6 +206,7 @@
   let boardStrategy = $derived<BoardInteractionStrategy | null>(
     game && currentPrompt ? createBoardStrategy(game, currentPrompt) : null,
   );
+  let showPromptHpBadges = $derived(boardStrategy?.iconName === 'damage');
   $effect(() => {
     if (!boardStrategy || !game) {
       return;
@@ -1069,6 +1070,7 @@
           {isPlayableTarget}
           {isBoardPromptSelectable}
           {isBoardPromptSelected}
+          {showPromptHpBadges}
           {boardSlotDelta}
           {clickSlot}
           {allowDrop}

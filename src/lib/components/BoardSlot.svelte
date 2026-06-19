@@ -1,6 +1,7 @@
 <script lang="ts">
   import CardTile from './CardTile.svelte';
   import { energyIconSrc, pokemonTypeIconSrc, pokemonTypeLabelFor } from '../game/energyIcons';
+  import { remainingHp } from '../game/hpDisplay';
   import type { PokemonSlotView } from '../game/types';
 
   type Props = {
@@ -9,6 +10,7 @@
     canDrop?: boolean;
     promptSelectable?: boolean;
     promptSelected?: boolean;
+    promptHpVisible?: boolean;
     slotDelta?: number;
     placement?: '' | 'top-active-slot' | 'bottom-active-slot';
     onclick?: (event: MouseEvent) => void;
@@ -22,6 +24,7 @@
     canDrop = false,
     promptSelectable = false,
     promptSelected = false,
+    promptHpVisible = false,
     slotDelta = 0,
     placement = '',
     onclick,
@@ -44,6 +47,10 @@
   let lastToolImageUrl = $state<string | undefined>();
   let showToolImage = $derived(!!toolPreviewImageUrl && failedToolImageUrl !== toolPreviewImageUrl);
   let energyTitle = $derived(attachedEnergyTitle());
+  let currentRemainingHp = $derived(remainingHp(displayHp, slot.damage));
+  let projectedRemainingHp = $derived(remainingHp(displayHp, slot.damage, slotDelta));
+  let showPromptHpBadge = $derived(promptHpVisible && (promptSelectable || promptSelected || slotDelta !== 0) && !!displayHp && !slot.empty);
+  let projectedHpTitle = $derived(slotDelta < 0 ? 'after queued damage removal' : 'after queued damage');
 
   $effect(() => {
     if (toolPreviewImageUrl !== lastToolImageUrl) {
@@ -99,6 +106,24 @@
   {#if slotDelta !== 0}
     <div class="prompt-damage-badge" class:negative={slotDelta < 0}>
       {slotDelta > 0 ? '+' : '−'}{Math.abs(slotDelta)}
+    </div>
+  {/if}
+
+  {#if showPromptHpBadge}
+    <div
+      class="prompt-hp-badge"
+      class:changed={slotDelta !== 0}
+      class:knockout={projectedRemainingHp === 0}
+      title={slotDelta === 0
+        ? `${currentRemainingHp}/${displayHp} HP remaining`
+        : `${currentRemainingHp}/${displayHp} HP remaining, ${projectedRemainingHp}/${displayHp} ${projectedHpTitle}`}
+    >
+      <span>HP</span>
+      <strong>{currentRemainingHp}</strong>
+      {#if slotDelta !== 0}
+        <span>-></span>
+        <strong>{projectedRemainingHp}</strong>
+      {/if}
     </div>
   {/if}
 
@@ -240,6 +265,57 @@
   .prompt-damage-badge.negative {
     background: #166e5b;
     box-shadow: 0 8px 18px rgba(15, 60, 49, 0.32);
+  }
+
+  .prompt-hp-badge {
+    position: absolute;
+    top: calc(var(--slot-card-w) * 0.025);
+    left: calc(var(--slot-card-w) * 0.025);
+    z-index: 9;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(2px, calc(var(--slot-card-w) * 0.022), 4px);
+    min-width: clamp(42px, calc(var(--slot-card-w) * 0.5), 76px);
+    min-height: clamp(20px, calc(var(--slot-card-w) * 0.2), 30px);
+    padding: clamp(2px, calc(var(--slot-card-w) * 0.025), 4px) clamp(5px, calc(var(--slot-card-w) * 0.055), 9px);
+    border: 1px solid rgba(219, 234, 254, 0.82);
+    border-radius: var(--radius-pill);
+    background: rgba(15, 23, 42, 0.92);
+    box-shadow:
+      0 8px 16px rgba(15, 23, 42, 0.34),
+      0 0 0 1px rgba(96, 165, 250, 0.2);
+    color: #e0f2fe;
+    font-size: clamp(10px, calc(var(--slot-card-w) * 0.092), 14px);
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: 0;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .prompt-hp-badge span {
+    color: #bfdbfe;
+    font-size: 0.72em;
+    font-weight: 900;
+  }
+
+  .prompt-hp-badge strong {
+    color: #f8fafc;
+    font-weight: 950;
+  }
+
+  .prompt-hp-badge.changed {
+    border-color: rgba(253, 186, 116, 0.92);
+    background: rgba(67, 20, 7, 0.92);
+    box-shadow:
+      0 8px 16px rgba(67, 20, 7, 0.34),
+      0 0 0 1px rgba(251, 146, 60, 0.28);
+  }
+
+  .prompt-hp-badge.knockout {
+    border-color: rgba(252, 165, 165, 0.96);
+    background: rgba(69, 10, 10, 0.94);
   }
 
   .empty-zone {

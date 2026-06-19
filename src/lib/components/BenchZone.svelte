@@ -17,6 +17,7 @@
     isPlayableTarget: (slot: PokemonSlotView) => boolean;
     isBoardPromptSelectable: (slot: PokemonSlotView) => boolean;
     isBoardPromptSelected: (slot: PokemonSlotView) => boolean;
+    showPromptHpBadges?: boolean;
     boardSlotDelta: (slot: PokemonSlotView) => number;
     clickSlot: (slot: PokemonSlotView) => void;
     allowDrop: (event: DragEvent, slot: PokemonSlotView) => void;
@@ -38,6 +39,7 @@
     isPlayableTarget,
     isBoardPromptSelectable,
     isBoardPromptSelected,
+    showPromptHpBadges = false,
     boardSlotDelta,
     clickSlot,
     allowDrop,
@@ -77,6 +79,7 @@
         canDrop={isPlayableTarget(slot)}
         promptSelectable={isBoardPromptSelectable(slot)}
         promptSelected={isBoardPromptSelected(slot)}
+        promptHpVisible={showPromptHpBadges}
         slotDelta={boardSlotDelta(slot)}
         onclick={() => clickSlot(slot)}
         ondragover={(event) => allowDrop(event, slot)}
@@ -195,6 +198,11 @@
     inset: auto auto 0 0;
     align-items: start;
     justify-items: start;
+  }
+
+  .bench-row.opponent :global(.prompt-hp-badge) {
+    inset: auto auto calc(var(--slot-card-w) * 0.025) 50%;
+    transform: translateX(-50%);
   }
 
   .bench-row.opponent :global(.damage-counter-value) {

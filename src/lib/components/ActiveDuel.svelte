@@ -15,6 +15,7 @@
     isPlayableTarget: (slot: PokemonSlotView) => boolean;
     isBoardPromptSelectable: (slot: PokemonSlotView) => boolean;
     isBoardPromptSelected: (slot: PokemonSlotView) => boolean;
+    showPromptHpBadges?: boolean;
     boardSlotDelta: (slot: PokemonSlotView) => number;
     clickSlot: (slot: PokemonSlotView) => void;
     allowDrop: (event: DragEvent, slot: PokemonSlotView) => void;
@@ -34,6 +35,7 @@
     isPlayableTarget,
     isBoardPromptSelectable,
     isBoardPromptSelected,
+    showPromptHpBadges = false,
     boardSlotDelta,
     clickSlot,
     allowDrop,
@@ -60,6 +62,7 @@
     canDrop={isPlayableTarget(topPlayer.active) || canPlaceSetupActive(topPlayer.active)}
     promptSelectable={isBoardPromptSelectable(topPlayer.active)}
     promptSelected={isBoardPromptSelected(topPlayer.active)}
+    promptHpVisible={showPromptHpBadges}
     slotDelta={boardSlotDelta(topPlayer.active)}
     onclick={() => clickActive(topPlayer.active)}
     ondragover={(event) => allowDrop(event, topPlayer.active)}
@@ -77,6 +80,7 @@
     canDrop={isPlayableTarget(bottomPlayer.active) || canPlaceSetupActive(bottomPlayer.active)}
     promptSelectable={isBoardPromptSelectable(bottomPlayer.active)}
     promptSelected={isBoardPromptSelected(bottomPlayer.active)}
+    promptHpVisible={showPromptHpBadges}
     slotDelta={boardSlotDelta(bottomPlayer.active)}
     onclick={() => clickActive(bottomPlayer.active)}
     ondragover={(event) => allowDrop(event, bottomPlayer.active)}
@@ -158,6 +162,11 @@
     inset: auto auto 0 0;
     align-items: start;
     justify-items: start;
+  }
+
+  .active-duel :global(.top-active-slot .prompt-hp-badge) {
+    inset: auto auto calc(var(--slot-card-w) * 0.025) 50%;
+    transform: translateX(-50%);
   }
 
   .active-duel :global(.top-active-slot .damage-counter-value) {
