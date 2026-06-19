@@ -5,7 +5,7 @@ import {
 import { promptOptions } from '../prompts';
 import { promptLimit } from '../setupPrompt';
 import type { CardTarget, GameView, PromptView } from '../types';
-import { getBoardPromptTargets } from '../targets';
+import { getBoardPromptTargets, sameTarget } from '../targets';
 import {
   maxDamageForTarget,
   totalPlacedDamage,
@@ -33,6 +33,7 @@ export function createPutDamageStrategy(args: {
   const requiredDamage = promptLimit(prompt.fields.damage, 0);
   const maxAllowedDamage = normalizeDamagePlacements(prompt.fields.maxAllowedDamage);
   const allowPartialDamage = !!options.allowPlacePartialDamage;
+  const optionIndexesByTarget = normalizeOptionIndexesByTarget(prompt.fields.optionIndexesByTarget);
 
   function placedTotal() {
     return totalPlacedDamage(store.damagePlacements);
@@ -50,6 +51,19 @@ export function createPutDamageStrategy(args: {
     return total > 0 && (allowPartialDamage ? total <= requiredDamage : total === requiredDamage);
   }
 
+  function result() {
+    if (prompt.resultSchema !== 'optionIndexes') {
+      return store.damageResult();
+    }
+    return store.damagePlacements.flatMap((placement) => {
+      const optionIndex = optionIndexesByTarget.find((item) => sameTarget(item.target, placement.target))?.optionIndex;
+      if (optionIndex === undefined) {
+        return [];
+      }
+      return Array.from({ length: Math.floor(placement.damage / step) }, () => optionIndex);
+    });
+  }
+
   return {
     key: `put-damage:${prompt.id}`,
     isEligible: canPlace,
@@ -63,7 +77,7 @@ export function createPutDamageStrategy(args: {
     reset: () => store.resetDamagePlacements(),
     confirm() {
       if (canConfirm()) {
-        resolve(store.damageResult());
+        resolve(result());
       }
     },
     cancel: () => resolve(null),
@@ -86,6 +100,18 @@ export function createPutDamageStrategy(args: {
     },
     allowCancel: !!options.allowCancel,
   };
+}
+
+function normalizeOptionIndexesByTarget(value: unknown): Array<{ target: CardTarget; optionIndex: number }> {
+  return Array.isArray(value)
+    ? value.filter((item): item is { target: CardTarget; optionIndex: number } =>
+        item
+          && typeof item === 'object'
+          && 'target' in item
+          && 'optionIndex' in item
+          && typeof item.optionIndex === 'number',
+      )
+    : [];
 }
 
 function normalizeDamagePlacements(value: unknown): DamagePlacement[] {

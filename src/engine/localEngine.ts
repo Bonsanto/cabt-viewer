@@ -259,11 +259,16 @@ export class LocalEngineController {
   }
 
   private canBatchRepeatedSingleSelection(select: CabtSelectData, selection: number[]): boolean {
-    return selection.length > select.maxCount
-      && select.maxCount === 1
-      && (select.context === CabtSelectContext.DISCARD_ENERGY || select.context === CabtSelectContext.DISCARD_ENERGY_CARD)
-      && new Set(selection).size === selection.length
-      && selection.every((index) => Number.isInteger(index) && index >= 0 && index < select.option.length);
+    if (selection.length <= select.maxCount || select.maxCount !== 1) {
+      return false;
+    }
+    if (!selection.every((index) => Number.isInteger(index) && index >= 0 && index < select.option.length)) {
+      return false;
+    }
+    if (select.context === CabtSelectContext.DISCARD_ENERGY || select.context === CabtSelectContext.DISCARD_ENERGY_CARD) {
+      return new Set(selection).size === selection.length;
+    }
+    return select.context === CabtSelectContext.DAMAGE_COUNTER || select.context === CabtSelectContext.DAMAGE_COUNTER_ANY;
   }
 
   private async applyRepeatedSingleSelections(selection: number[]): Promise<EngineResponse> {
@@ -271,7 +276,7 @@ export class LocalEngineController {
     if (!initialSelect) {
       throw new Error('No CABT selection is currently available.');
     }
-    const selectedKeys = selection.map((index) => this.optionCardKey(initialSelect.option[index]) ?? `index:${index}`);
+    const selectedKeys = selection.map((index) => this.optionSelectionKey(initialSelect.option[index]) ?? `index:${index}`);
     for (let step = 0; step < selectedKeys.length; step += 1) {
       const select = this.observation?.select;
       if (!select || !this.isRepeatedSingleSelection(select)) {
@@ -295,19 +300,51 @@ export class LocalEngineController {
 
   private isRepeatedSingleSelection(select: CabtSelectData): boolean {
     return select.maxCount === 1
-      && (select.context === CabtSelectContext.DISCARD_ENERGY || select.context === CabtSelectContext.DISCARD_ENERGY_CARD);
+      && (
+        select.context === CabtSelectContext.DISCARD_ENERGY
+        || select.context === CabtSelectContext.DISCARD_ENERGY_CARD
+        || select.context === CabtSelectContext.DAMAGE_COUNTER
+        || select.context === CabtSelectContext.DAMAGE_COUNTER_ANY
+      );
   }
 
   private findOptionIndexForKey(select: CabtSelectData, key: string): number {
-    const byKey = select.option.findIndex((option) => this.optionCardKey(option) === key);
+    const byKey = select.option.findIndex((option) => this.optionSelectionKey(option) === key);
     if (byKey >= 0) {
       return byKey;
+    }
+    if (this.isDamageCounterSelection(select)) {
+      return -1;
     }
     if (key.startsWith('index:')) {
       const index = Number(key.slice('index:'.length));
       return index >= 0 && index < select.option.length ? index : 0;
     }
     return select.option.length ? 0 : -1;
+  }
+
+  private isDamageCounterSelection(select: CabtSelectData): boolean {
+    return select.context === CabtSelectContext.DAMAGE_COUNTER || select.context === CabtSelectContext.DAMAGE_COUNTER_ANY;
+  }
+
+  private optionSelectionKey(option: CabtOption | undefined): string | undefined {
+    if (!option) {
+      return undefined;
+    }
+    if (option.energyIndex !== undefined || option.toolIndex !== undefined) {
+      return this.optionCardKey(option) ?? this.optionTargetKey(option);
+    }
+    return this.optionTargetKey(option) ?? this.optionCardKey(option);
+  }
+
+  private optionTargetKey(option: CabtOption): string | undefined {
+    if (option.area === undefined || option.area === null || option.index === undefined || option.index === null) {
+      return undefined;
+    }
+    const playerIndex = option.playerIndex ?? this.observation?.current?.yourIndex ?? 'current';
+    const energyIndex = option.energyIndex === undefined || option.energyIndex === null ? '' : option.energyIndex;
+    const toolIndex = option.toolIndex === undefined || option.toolIndex === null ? '' : option.toolIndex;
+    return `target:${playerIndex}:${option.area}:${option.index}:${energyIndex}:${toolIndex}`;
   }
 
   private optionCardKey(option: CabtOption | undefined): string | undefined {

@@ -559,6 +559,33 @@ function buildPrompts(observation: CabtObservation, activePlayerIndex: number, d
     return [];
   }
   const id = promptIdForSelect(select);
+  if (isDamageCounterPrompt(select, observation, activePlayerIndex)) {
+    const targets = optionTargetsForSelect(select, observation, activePlayerIndex);
+    const counters = damageCounterCount(select);
+    return [
+      {
+        id,
+        className: 'PutDamagePrompt',
+        type: 'cabt-damage-counter-select',
+        playerId: activePlayerIndex,
+        playerIndex: activePlayerIndex,
+        supported: true,
+        message: cabtSelectLabel(select.context),
+        resultSchema: 'optionIndexes',
+        fields: {
+          targets: targets.map((item) => item.target),
+          optionIndexesByTarget: targets,
+          damage: counters * 10,
+          options: {
+            min: counters,
+            max: counters,
+            damageMultiple: 10,
+          },
+          cabtSelect: select,
+        },
+      },
+    ];
+  }
   if (isPrizeSelectionPrompt(select)) {
     return [
       {
@@ -675,6 +702,8 @@ function promptIdForSelect(select: NonNullable<CabtObservation['select']>) {
     type: select.type,
     min: select.minCount,
     max: select.maxCount,
+    remainDamageCounter: select.remainDamageCounter,
+    remainEnergyCost: select.remainEnergyCost,
     options: select.option.map((option) => [
       option.type,
       option.area,
@@ -698,6 +727,48 @@ function hashPromptKey(value: string) {
     hash = ((hash << 5) + hash) ^ value.charCodeAt(index);
   }
   return Math.abs(hash);
+}
+
+function isDamageCounterPrompt(select: CabtSelectData, observation: CabtObservation, activePlayerIndex: number) {
+  return (select.context === CabtSelectContext.DAMAGE_COUNTER || select.context === CabtSelectContext.DAMAGE_COUNTER_ANY)
+    && optionTargetsForSelect(select, observation, activePlayerIndex).length > 0;
+}
+
+function damageCounterCount(select: CabtSelectData) {
+  const remain = Number(select.remainDamageCounter);
+  if (Number.isFinite(remain) && remain > 0) {
+    return Math.floor(remain);
+  }
+  return Math.max(1, select.maxCount, select.minCount);
+}
+
+function optionTargetsForSelect(select: CabtSelectData, observation: CabtObservation, activePlayerIndex: number) {
+  return select.option
+    .map((option, optionIndex) => {
+      const target = optionTargetForSelectOption(option, select, observation.current?.yourIndex ?? activePlayerIndex);
+      return target ? { target, optionIndex } : null;
+    })
+    .filter((item): item is { target: CardTarget; optionIndex: number } => !!item);
+}
+
+function optionTargetForSelectOption(option: CabtOption, _select: CabtSelectData, defaultPlayerIndex: number | null): CardTarget | null {
+  if (
+    option.index === undefined
+    || option.index === null
+    || (option.area !== CabtAreaType.ACTIVE && option.area !== CabtAreaType.BENCH)
+  ) {
+    return null;
+  }
+  const playerIndex = option.playerIndex ?? defaultPlayerIndex;
+  if (playerIndex === undefined || playerIndex === null) {
+    return null;
+  }
+  return targetFor(
+    defaultPlayerIndex ?? playerIndex,
+    playerIndex,
+    option.area === CabtAreaType.ACTIVE ? SlotType.ACTIVE : SlotType.BENCH,
+    option.index,
+  );
 }
 
 function buildAvailableActions(

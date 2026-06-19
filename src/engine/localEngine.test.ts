@@ -334,6 +334,118 @@ describe('LocalEngineController', () => {
     expect(bridgeCalled).toBe(false);
   });
 
+  it('batches repeated CABT damage-counter prompts and allows duplicate targets', async () => {
+    const engine = new LocalEngineController() as any;
+    const selections: number[][] = [];
+    const current = {
+      turn: 8,
+      turnActionCount: 4,
+      yourIndex: 0,
+      firstPlayer: 0,
+      supporterPlayed: false,
+      stadiumPlayed: false,
+      energyAttached: true,
+      retreated: false,
+      result: -1,
+      stadium: [],
+      looking: null,
+      players: [],
+    };
+    let remaining = 4;
+    const damageSelect = () => ({
+      type: 1,
+      context: CabtSelectContext.DAMAGE_COUNTER_ANY,
+      minCount: 1,
+      maxCount: 1,
+      remainDamageCounter: remaining,
+      remainEnergyCost: 0,
+      option: [
+        { type: CabtOptionType.CARD, area: CabtAreaType.BENCH, index: 0, playerIndex: 1 },
+        { type: CabtOptionType.CARD, area: CabtAreaType.BENCH, index: 1, playerIndex: 1 },
+      ],
+      deck: null,
+      contextCard: null,
+      effect: null,
+    });
+    engine.sessionId = 'test-session';
+    engine.dataMaps = { cardData: {}, attacks: {} };
+    engine.observation = {
+      select: damageSelect(),
+      logs: [],
+      current,
+    };
+    engine.bridge = {
+      request: async ({ selection }: { selection: number[] }) => {
+        selections.push(selection);
+        remaining -= 1;
+        return {
+          ok: true,
+          observation: { select: remaining > 0 ? damageSelect() : null, logs: [], current },
+        };
+      },
+    };
+
+    await engine.applySelection([0, 0, 1, 0]);
+
+    expect(selections).toEqual([[0], [0], [1], [0]]);
+  });
+
+  it('does not redirect batched damage counters when a later target is missing', async () => {
+    const engine = new LocalEngineController() as any;
+    const selections: number[][] = [];
+    const current = {
+      turn: 8,
+      turnActionCount: 4,
+      yourIndex: 0,
+      firstPlayer: 0,
+      supporterPlayed: false,
+      stadiumPlayed: false,
+      energyAttached: true,
+      retreated: false,
+      result: -1,
+      stadium: [],
+      looking: null,
+      players: [],
+    };
+    const damageSelect = (options: number[]) => ({
+      type: 1,
+      context: CabtSelectContext.DAMAGE_COUNTER_ANY,
+      minCount: 1,
+      maxCount: 1,
+      remainDamageCounter: 2,
+      remainEnergyCost: 0,
+      option: options.map((index) => ({
+        type: CabtOptionType.CARD,
+        area: CabtAreaType.BENCH,
+        index,
+        playerIndex: 1,
+      })),
+      deck: null,
+      contextCard: null,
+      effect: null,
+    });
+    engine.sessionId = 'test-session';
+    engine.dataMaps = { cardData: {}, attacks: {} };
+    engine.observation = {
+      select: damageSelect([0, 1]),
+      logs: [],
+      current,
+    };
+    engine.bridge = {
+      request: async ({ selection }: { selection: number[] }) => {
+        selections.push(selection);
+        return {
+          ok: true,
+          observation: { select: damageSelect([0]), logs: [], current },
+        };
+      },
+    };
+
+    await engine.applySelection([0, 1]);
+
+    expect(selections).toEqual([[0]]);
+  });
+
   it('writes full private human trace snapshots for local selections', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cabt-traces-'));
     const traceDir = path.join(root, 'private', 'traces');

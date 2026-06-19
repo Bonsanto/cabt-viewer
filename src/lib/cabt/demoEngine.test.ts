@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cabtObservationToGameView } from './demoEngine';
 import type { CabtDataMaps } from './demoEngine';
+import { SlotType, targetFor } from '../game/types';
 import { CabtAreaType, CabtCardType, CabtOptionType, CabtSelectContext, CabtSelectType } from './types';
 import type { CabtObservation } from './types';
 
@@ -289,6 +290,150 @@ describe('cabtObservationToGameView', () => {
         promptLabel: 'P0 Bench 1: Sprigatito',
         promptSubLabel: 'HP 70/70 · energy 1/1',
       }),
+    ]);
+  });
+
+  it('routes CABT damage-counter target choices through the board damage prompt', () => {
+    const dataMaps: CabtDataMaps = {
+      cardData: {
+        382: {
+          cardId: 382,
+          name: 'Kyogre',
+          cardType: CabtCardType.POKEMON,
+          basic: true,
+          hp: 150,
+        },
+      },
+      attacks: {},
+    };
+    const observation = {
+      select: {
+        type: CabtSelectType.CARD,
+        context: CabtSelectContext.DAMAGE_COUNTER_ANY,
+        minCount: 1,
+        maxCount: 1,
+        remainDamageCounter: 6,
+        remainEnergyCost: 0,
+        option: [
+          { type: CabtOptionType.CARD, area: CabtAreaType.BENCH, index: 0, playerIndex: 1 },
+          { type: CabtOptionType.CARD, area: CabtAreaType.BENCH, index: 1, playerIndex: 1 },
+        ],
+        deck: null,
+        contextCard: null,
+        effect: null,
+      },
+      logs: [],
+      current: {
+        turn: 8,
+        turnActionCount: 4,
+        yourIndex: 0,
+        firstPlayer: 0,
+        supporterPlayed: false,
+        stadiumPlayed: false,
+        energyAttached: true,
+        retreated: false,
+        result: -1,
+        stadium: [],
+        looking: null,
+        players: [
+          player(),
+          {
+            ...player(),
+            bench: [
+              { id: 382, hp: 120, maxHp: 150, appearThisTurn: false, energies: [], energyCards: [], tools: [], preEvolution: [] },
+              { id: 382, hp: 150, maxHp: 150, appearThisTurn: false, energies: [], energyCards: [], tools: [], preEvolution: [] },
+            ],
+            benchMax: 5,
+          },
+        ],
+      },
+    } satisfies CabtObservation;
+
+    const view = cabtObservationToGameView(observation, [], dataMaps);
+    const prompt = view.prompts[0];
+
+    expect(prompt?.className).toBe('PutDamagePrompt');
+    expect(prompt?.resultSchema).toBe('optionIndexes');
+    expect(prompt?.fields.damage).toBe(60);
+    expect(prompt?.fields.options).toEqual({ min: 6, max: 6, damageMultiple: 10 });
+    expect(prompt?.fields.targets).toEqual([
+      targetFor(0, 1, SlotType.BENCH, 0),
+      targetFor(0, 1, SlotType.BENCH, 1),
+    ]);
+    expect(prompt?.fields.optionIndexesByTarget).toEqual([
+      { target: targetFor(0, 1, SlotType.BENCH, 0), optionIndex: 0 },
+      { target: targetFor(0, 1, SlotType.BENCH, 1), optionIndex: 1 },
+    ]);
+  });
+
+  it('keeps CABT damage-counter target orientation when player 1 is active', () => {
+    const dataMaps: CabtDataMaps = {
+      cardData: {
+        382: {
+          cardId: 382,
+          name: 'Kyogre',
+          cardType: CabtCardType.POKEMON,
+          basic: true,
+          hp: 150,
+        },
+      },
+      attacks: {},
+    };
+    const observation = {
+      select: {
+        type: CabtSelectType.CARD,
+        context: CabtSelectContext.DAMAGE_COUNTER_ANY,
+        minCount: 1,
+        maxCount: 1,
+        remainDamageCounter: 2,
+        remainEnergyCost: 0,
+        option: [
+          { type: CabtOptionType.CARD, area: CabtAreaType.BENCH, index: 0, playerIndex: 0 },
+          { type: CabtOptionType.CARD, area: CabtAreaType.BENCH, index: 0, playerIndex: 1 },
+        ],
+        deck: null,
+        contextCard: null,
+        effect: null,
+      },
+      logs: [],
+      current: {
+        turn: 8,
+        turnActionCount: 4,
+        yourIndex: 1,
+        firstPlayer: 0,
+        supporterPlayed: false,
+        stadiumPlayed: false,
+        energyAttached: true,
+        retreated: false,
+        result: -1,
+        stadium: [],
+        looking: null,
+        players: [
+          {
+            ...player(),
+            bench: [{ id: 382, hp: 120, maxHp: 150, appearThisTurn: false, energies: [], energyCards: [], tools: [], preEvolution: [] }],
+            benchMax: 5,
+          },
+          {
+            ...player(),
+            bench: [{ id: 382, hp: 150, maxHp: 150, appearThisTurn: false, energies: [], energyCards: [], tools: [], preEvolution: [] }],
+            benchMax: 5,
+          },
+        ],
+      },
+    } satisfies CabtObservation;
+
+    const view = cabtObservationToGameView(observation, [], dataMaps);
+    const prompt = view.prompts[0];
+
+    expect(prompt?.className).toBe('PutDamagePrompt');
+    expect(prompt?.fields.targets).toEqual([
+      targetFor(1, 0, SlotType.BENCH, 0),
+      targetFor(1, 1, SlotType.BENCH, 0),
+    ]);
+    expect(prompt?.fields.optionIndexesByTarget).toEqual([
+      { target: targetFor(1, 0, SlotType.BENCH, 0), optionIndex: 0 },
+      { target: targetFor(1, 1, SlotType.BENCH, 0), optionIndex: 1 },
     ]);
   });
 
