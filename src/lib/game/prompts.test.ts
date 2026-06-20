@@ -92,6 +92,7 @@ describe('prompt helpers', () => {
     expect(result).toBe(true);
     expect(shouldAutoResolvePrompt(item, false, result)).toBe(false);
     expect(shouldAutoResolvePrompt(item, true, result)).toBe(true);
+    expect(shouldAutoResolvePrompt(item, false, result, true)).toBe(true);
   });
 
   it('does not auto-resolve optional card search prompts', () => {

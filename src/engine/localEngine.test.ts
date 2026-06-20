@@ -543,6 +543,130 @@ describe('LocalEngineController', () => {
     }
   });
 
+  it('does not record agent-controlled selections as human trace decisions', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cabt-traces-'));
+    const traceDir = path.join(root, 'private', 'traces');
+    const oldTraceDir = process.env.CABT_TRACE_DIR;
+    const oldTraceEnabled = process.env.CABT_TRACE_ENABLED;
+    process.env.CABT_TRACE_DIR = traceDir;
+    process.env.CABT_TRACE_ENABLED = '1';
+    try {
+      const engine = new LocalEngineController() as any;
+      const current = {
+        turn: 2,
+        turnActionCount: 1,
+        yourIndex: 0,
+        firstPlayer: 0,
+        supporterPlayed: false,
+        stadiumPlayed: false,
+        energyAttached: false,
+        retreated: false,
+        result: -1,
+        stadium: [],
+        looking: null,
+        players: [],
+      };
+      engine.sessionId = 'agent-trace-session';
+      engine.playerControls = ['agent', 'self'];
+      engine.dataMaps = { cardData: {}, attacks: {} };
+      engine.observation = {
+        select: {
+          type: 0,
+          context: CabtSelectContext.MAIN,
+          minCount: 1,
+          maxCount: 1,
+          remainDamageCounter: 0,
+          remainEnergyCost: 0,
+          option: [{ type: CabtOptionType.END }],
+          deck: null,
+          contextCard: null,
+          effect: null,
+        },
+        logs: [],
+        current,
+      };
+      engine.traceRecorder.start('agent-trace-session', { playerControls: ['agent', 'self'] });
+      engine.bridge = {
+        request: async () => ({
+          ok: true,
+          observation: {
+            select: null,
+            logs: [],
+            current: { ...current, turnActionCount: 2 },
+          },
+        }),
+      };
+
+      await engine.applySelection([0]);
+
+      expect(fs.existsSync(traceDir) ? fs.readdirSync(traceDir) : []).toEqual([]);
+    } finally {
+      if (oldTraceDir === undefined) {
+        delete process.env.CABT_TRACE_DIR;
+      } else {
+        process.env.CABT_TRACE_DIR = oldTraceDir;
+      }
+      if (oldTraceEnabled === undefined) {
+        delete process.env.CABT_TRACE_ENABLED;
+      } else {
+        process.env.CABT_TRACE_ENABLED = oldTraceEnabled;
+      }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('tags the latest private trace with trust, confidence, notes, and plan tags', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cabt-traces-'));
+    const traceDir = path.join(root, 'private', 'traces');
+    const oldTraceDir = process.env.CABT_TRACE_DIR;
+    process.env.CABT_TRACE_DIR = traceDir;
+    try {
+      fs.mkdirSync(traceDir, { recursive: true });
+      const tracePath = path.join(traceDir, 'cabt-tag-session.jsonl');
+      fs.writeFileSync(tracePath, `${JSON.stringify({
+        schemaVersion: 1,
+        kind: 'human_play_trace',
+        traceId: 'cabt-tag-session',
+        createdAt: '2026-06-20T00:00:00Z',
+        source: { tool: 'cabt-viewer', reviewer: 'local-reviewer', runId: 'cabt-tag-session' },
+        trust: 'silver',
+        confidence: 4,
+        segments: [],
+      })}\n`, 'utf8');
+
+      const engine = new LocalEngineController();
+      const response = engine.tagLatestTrace({
+        trust: 'gold',
+        confidence: 5,
+        note: 'mirror_second_perfect_win',
+        tags: 'mirror,perfect,mirror',
+      });
+
+      expect(response).toMatchObject({
+        ok: true,
+        trust: 'gold',
+        confidence: 5,
+        qualityNoteCount: 1,
+        planTagCount: 1,
+      });
+      const tagged = JSON.parse(fs.readFileSync(tracePath, 'utf8'));
+      expect(tagged.trust).toBe('gold');
+      expect(tagged.confidence).toBe(5);
+      expect(tagged.qualityNotes[0]).toMatchObject({
+        source: 'cabt-ui',
+        note: 'mirror_second_perfect_win',
+      });
+      expect(tagged.planTags.tags).toEqual(['mirror', 'perfect']);
+    } finally {
+      if (oldTraceDir === undefined) {
+        delete process.env.CABT_TRACE_DIR;
+      } else {
+        process.env.CABT_TRACE_DIR = oldTraceDir;
+      }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('records terminal post-action outcomes for completed games', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cabt-traces-'));
     const traceDir = path.join(root, 'private', 'traces');

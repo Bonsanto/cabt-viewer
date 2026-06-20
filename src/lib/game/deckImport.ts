@@ -1,6 +1,13 @@
 export type ParsedDeck = {
   cards: string[];
+  entries: ParsedDeckEntry[];
   errors: string[];
+};
+
+export type ParsedDeckEntry = {
+  card: string;
+  line: number;
+  raw: string;
 };
 
 export type DeckCardMetadata = {
@@ -28,6 +35,7 @@ Energy: 35
 
 export function parseDeckList(text: string): ParsedDeck {
   const cards: string[] = [];
+  const entries: ParsedDeckEntry[] = [];
   const errors: string[] = [];
   const lines = text.split(/\r?\n/);
 
@@ -58,13 +66,37 @@ export function parseDeckList(text: string): ParsedDeck {
     for (let i = 0; i < count; i += 1) {
       cards.push(normalizedName);
     }
+    entries.push({ card: normalizedName, line: idx + 1, raw: rawLine.trim() });
   });
 
   if (cards.length === 0) {
     errors.push('Deck is empty.');
   }
 
-  return { cards, errors };
+  return { cards, entries, errors };
+}
+
+export function validateParsedDeck(parsed: ParsedDeck, cardRows: DeckCardMetadata[]): string[] {
+  const errors: string[] = [];
+  if (!parsed.errors.length && parsed.cards.length !== 60) {
+    errors.push(`Deck must contain exactly 60 cards, found ${parsed.cards.length}.`);
+  }
+
+  const resolver = createDeckCardResolver(cardRows);
+  for (const entry of parsed.entries) {
+    const resolution = resolver.resolve(entry.card);
+    if (resolution.status === 'ok') {
+      continue;
+    }
+    const suffix = resolution.suggestions.length ? ` Supported prints: ${resolution.suggestions.join(', ')}.` : '';
+    if (resolution.status === 'ambiguous') {
+      errors.push(`Line ${entry.line}: "${entry.raw}" matches multiple CABT card IDs.${suffix}`);
+    } else {
+      errors.push(`Line ${entry.line}: could not resolve "${entry.raw}" to a CABT card ID.${suffix}`);
+    }
+  }
+
+  return errors;
 }
 
 export function formatCabtDeckList(rawDeck: string, cardRows: DeckCardMetadata[]): string {
@@ -144,4 +176,59 @@ function normalizeImportName(name: string): string {
     };
     return `${energyNames[type] ?? type} Energy`;
   });
+}
+
+function createDeckCardResolver(cardRows: DeckCardMetadata[]) {
+  const byCard = new Map<string, DeckCardMetadata[]>();
+  const byName = new Map<string, DeckCardMetadata[]>();
+  for (const row of cardRows) {
+    const normalizedName = normalizeResolvedCardName(row.name);
+    addRow(byCard, `${row.set}\0${normalizedName}`, row);
+    addRow(byName, normalizedName, row);
+  }
+
+  return {
+    resolve(card: string): { status: 'ok' | 'missing' | 'ambiguous'; suggestions: string[] } {
+      const tokens = card.trim().split(/\s+/);
+      const set = tokens.at(-1) ?? '';
+      const normalizedName = normalizeResolvedCardName(tokens.slice(0, -1).join(' '));
+      const candidates = byCard.get(`${set}\0${normalizedName}`) ?? [];
+      if (candidates.length === 1) {
+        return { status: 'ok', suggestions: [] };
+      }
+      const suggestions = (byName.get(normalizedName) ?? [])
+        .slice(0, 5)
+        .map((row) => `${row.name} ${row.set}${row.setNumber ? ` ${row.setNumber}` : ''}`);
+      return { status: candidates.length > 1 ? 'ambiguous' : 'missing', suggestions };
+    },
+  };
+}
+
+function addRow(map: Map<string, DeckCardMetadata[]>, key: string, row: DeckCardMetadata) {
+  const rows = map.get(key);
+  if (rows) {
+    rows.push(row);
+  } else {
+    map.set(key, [row]);
+  }
+}
+
+function normalizeResolvedCardName(name: string): string {
+  const withoutAccents = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const normalized = withoutAccents.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase();
+  const energy = /^([a-z]+) energy$/.exec(normalized);
+  if (!energy) {
+    return normalized;
+  }
+  const energySymbols: Record<string, string> = {
+    grass: 'g',
+    fire: 'r',
+    water: 'w',
+    lightning: 'l',
+    psychic: 'p',
+    fighting: 'f',
+    darkness: 'd',
+    metal: 'm',
+  };
+  return energySymbols[energy[1]] ? `basic {${energySymbols[energy[1]]}} energy` : normalized;
 }

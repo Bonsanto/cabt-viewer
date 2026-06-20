@@ -57,7 +57,9 @@ sample_submission/
     cg.dll
 ```
 
-Point the bridge at that directory:
+If the Kaggle data is extracted to `~/Downloads/pokemon-tcg-ai-battle`,
+the bridge detects `sample_submission` automatically. Otherwise, point the
+bridge at that directory:
 
 ```bash
 export CABT_SAMPLE_SUBMISSION_DIR=/absolute/path/to/sample_submission

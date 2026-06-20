@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AgentOption, GameLogEntry } from '../home/catalog';
+  import type { PlayerControl } from '../game/httpClient';
 
   type HomeMode = 'play' | 'logs';
 
@@ -7,10 +8,18 @@
     homeMode: HomeMode;
     deck1Text: string;
     deck2Text: string;
-    selectedAgentId: string;
+    player1Control: PlayerControl;
+    player2Control: PlayerControl;
+    player1AgentId: string;
+    player2AgentId: string;
+    player1DeckSource: string;
+    player2DeckSource: string;
     agents?: AgentOption[];
     gameLogs?: GameLogEntry[];
-    opponentDeckLocked?: boolean;
+    player1DeckLocked?: boolean;
+    player2DeckLocked?: boolean;
+    player1AgentHasPairedDeck?: boolean;
+    player2AgentHasPairedDeck?: boolean;
     busy?: boolean;
     catalogBusy?: boolean;
     error?: string;
@@ -25,10 +34,18 @@
     homeMode,
     deck1Text = $bindable(),
     deck2Text = $bindable(),
-    selectedAgentId = $bindable(),
+    player1Control = $bindable(),
+    player2Control = $bindable(),
+    player1AgentId = $bindable(),
+    player2AgentId = $bindable(),
+    player1DeckSource = $bindable(),
+    player2DeckSource = $bindable(),
     agents = [],
     gameLogs = [],
-    opponentDeckLocked = false,
+    player1DeckLocked = false,
+    player2DeckLocked = false,
+    player1AgentHasPairedDeck = false,
+    player2AgentHasPairedDeck = false,
     busy = false,
     catalogBusy = false,
     error = '',
@@ -39,10 +56,23 @@
     refreshCatalog,
   }: Props = $props();
 
-  let selectedAgent = $derived(agents.find((agent) => agent.id === selectedAgentId) ?? agents[0]);
+  let deckOptions = $derived(agents.filter((agent) => !!agent.deckUrl));
+  let startDisabled = $derived(
+    busy
+      || (player1Control === 'agent' && !player1AgentId)
+      || (player2Control === 'agent' && !player2AgentId),
+  );
 
   function logPlayerLabel(log: GameLogEntry): string {
     return log.players?.length ? log.players.join(' vs ') : 'AI vs AI';
+  }
+
+  function setPlayerControl(playerIndex: 0 | 1, control: PlayerControl) {
+    if (playerIndex === 0) {
+      player1Control = control;
+    } else {
+      player2Control = control;
+    }
   }
 </script>
 
@@ -53,41 +83,117 @@
   </div>
 
   {#if homeMode === 'play'}
-    <div class="play-controls">
-      <label>
-        AI opponent
-        <select bind:value={selectedAgentId} disabled={busy || agents.length === 0}>
-          {#each agents as agent}
-            <option value={agent.id}>{agent.name}</option>
-          {/each}
-        </select>
-      </label>
-      {#if selectedAgent?.description}
-        <span class="agent-detail">{selectedAgent.description}</span>
-      {/if}
-    </div>
-
     <div class="deck-import two-column">
-      <label>
-        Your deck
-        <textarea bind:value={deck1Text} spellcheck="false"></textarea>
-      </label>
-      <label>
-        <span class="deck-label-row">
-          AI opponent deck
-          {#if opponentDeckLocked}
-            <small>Agent deck</small>
+      <div class="player-config">
+        <span class="deck-label-row">Player 1</span>
+        <span class="control-tabs" role="tablist" aria-label="Player 1 control">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={player1Control === 'self'}
+            class:active={player1Control === 'self'}
+            disabled={busy}
+            onclick={() => setPlayerControl(0, 'self')}
+          >Self</button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={player1Control === 'agent'}
+            class:active={player1Control === 'agent'}
+            disabled={busy}
+            onclick={() => setPlayerControl(0, 'agent')}
+          >Agent</button>
+        </span>
+        <span class:self-only={player1Control === 'self'} class="setup-fields">
+          {#if player1Control === 'agent'}
+            <span class="field-row">
+              <span>Agent</span>
+              <select bind:value={player1AgentId} disabled={busy || agents.length === 0} aria-label="Player 1 agent">
+                {#each agents as agent}
+                  <option value={agent.id}>{agent.name}</option>
+                {/each}
+              </select>
+            </span>
           {/if}
+          <span class="field-row">
+            <span>Deck</span>
+            <select
+              bind:value={player1DeckSource}
+              disabled={busy || player1AgentHasPairedDeck}
+              aria-label="Player 1 deck"
+            >
+              <option value="import">Import deck</option>
+              {#each deckOptions as agent}
+                <option value={agent.id}>{agent.name}</option>
+              {/each}
+            </select>
+          </span>
+        </span>
+        <textarea
+          bind:value={deck1Text}
+          aria-label="Player 1 deck list"
+          readonly={player1DeckLocked}
+          class:locked={player1DeckLocked}
+          spellcheck="false"
+        ></textarea>
+      </div>
+
+      <div class="player-config">
+        <span class="deck-label-row">Player 2</span>
+        <span class="control-tabs" role="tablist" aria-label="Player 2 control">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={player2Control === 'self'}
+            class:active={player2Control === 'self'}
+            disabled={busy}
+            onclick={() => setPlayerControl(1, 'self')}
+          >Self</button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={player2Control === 'agent'}
+            class:active={player2Control === 'agent'}
+            disabled={busy}
+            onclick={() => setPlayerControl(1, 'agent')}
+          >Agent</button>
+        </span>
+        <span class:self-only={player2Control === 'self'} class="setup-fields">
+          {#if player2Control === 'agent'}
+            <span class="field-row">
+              <span>Agent</span>
+              <select bind:value={player2AgentId} disabled={busy || agents.length === 0} aria-label="Player 2 agent">
+                {#each agents as agent}
+                  <option value={agent.id}>{agent.name}</option>
+                {/each}
+              </select>
+            </span>
+          {/if}
+          <span class="field-row">
+            <span>Deck</span>
+            <select
+              bind:value={player2DeckSource}
+              disabled={busy || player2AgentHasPairedDeck}
+              aria-label="Player 2 deck"
+            >
+              <option value="import">Import deck</option>
+              {#each deckOptions as agent}
+                <option value={agent.id}>{agent.name}</option>
+              {/each}
+            </select>
+          </span>
         </span>
         <textarea
           bind:value={deck2Text}
-          readonly={opponentDeckLocked}
-          class:locked={opponentDeckLocked}
+          aria-label="Player 2 deck list"
+          readonly={player2DeckLocked}
+          class:locked={player2DeckLocked}
           spellcheck="false"
         ></textarea>
-      </label>
+      </div>
     </div>
-    <button class="primary" disabled={busy || !selectedAgentId} onclick={startGame}>
+
+    <button class="primary" disabled={startDisabled} onclick={startGame}>
       {busy ? 'Starting...' : 'Start game'}
     </button>
     {#if error}
@@ -140,7 +246,7 @@
   }
 
   .home-tabs {
-    justify-self: center;
+    justify-self: stretch;
     display: inline-grid;
     grid-template-columns: repeat(2, minmax(96px, 1fr));
     gap: 4px;
@@ -148,6 +254,7 @@
     border-radius: 8px;
     border: 1px solid var(--surface-inset-border);
     background: var(--surface-inset-bg);
+    box-shadow: var(--surface-toolbar-shadow);
   }
 
   .home-tabs button {
@@ -163,27 +270,11 @@
     box-shadow: var(--surface-toolbar-shadow);
   }
 
-  .play-controls,
   .log-toolbar {
     display: flex;
     align-items: end;
     justify-content: space-between;
     gap: 12px;
-  }
-
-  .play-controls label {
-    display: grid;
-    gap: 8px;
-    min-width: min(360px, 100%);
-    color: var(--text-primary);
-    font-weight: 800;
-  }
-
-  .agent-detail {
-    max-width: 560px;
-    color: var(--text-secondary);
-    font-size: 13px;
-    text-align: right;
   }
 
   .deck-import {
@@ -195,7 +286,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .deck-import label {
+  .player-config {
     display: grid;
     gap: 8px;
     color: var(--text-primary);
@@ -209,10 +300,49 @@
     gap: 8px;
   }
 
-  .deck-label-row small {
+  .control-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid var(--surface-inset-border);
+    background: var(--surface-inset-bg);
+  }
+
+  .control-tabs button {
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-weight: 900;
+  }
+
+  .control-tabs button.active {
+    background: var(--button-bg);
+    color: var(--button-text);
+    box-shadow: var(--surface-toolbar-shadow);
+  }
+
+  .setup-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    min-height: 40px;
+  }
+
+  .setup-fields.self-only {
+    grid-template-columns: 1fr;
+  }
+
+  .field-row {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
     color: var(--text-secondary);
     font-size: 12px;
-    font-weight: 800;
+    font-weight: 900;
   }
 
   textarea {
@@ -304,14 +434,9 @@
       grid-template-columns: 1fr;
     }
 
-    .play-controls,
     .log-toolbar {
       align-items: stretch;
       flex-direction: column;
-    }
-
-    .agent-detail {
-      text-align: left;
     }
   }
 </style>

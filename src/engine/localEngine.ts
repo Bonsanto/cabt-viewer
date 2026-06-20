@@ -31,6 +31,7 @@ type BridgeResponse = {
   error?: string;
   traceback?: string;
   observation?: CabtObservation;
+  autoSteps?: CabtObservation[];
   cards?: CabtCardData[];
   attacks?: CabtAttack[];
 };
@@ -43,6 +44,24 @@ type PendingBridgeCall = {
 type PendingRetreatTarget = {
   playerIndex: number;
   benchIndex: number;
+};
+
+type PlayerControl = 'self' | 'agent';
+
+type TraceTagPayload = {
+  trust?: unknown;
+  confidence?: unknown;
+  note?: unknown;
+  tags?: unknown;
+};
+
+type TraceTagResponse = {
+  ok: boolean;
+  error?: string;
+  trust?: string;
+  confidence?: number;
+  qualityNoteCount?: number;
+  planTagCount?: number;
 };
 
 type AgentManifest = {
@@ -63,6 +82,8 @@ type HumanTraceRecord = {
     reviewer: string;
     runId: string;
     agentPath?: string;
+    agentPaths?: Array<string | undefined>;
+    playerControls?: [PlayerControl, PlayerControl];
   };
   trust: string;
   confidence: number;
@@ -118,6 +139,7 @@ export class LocalEngineController {
   private logId = 1;
   private sessionId = '';
   private pendingRetreatTarget: PendingRetreatTarget | null = null;
+  private playerControls: [PlayerControl, PlayerControl] = ['self', 'agent'];
 
   constructor() {
     this.bridge = new CabtBridgeClient(() => this.invalidateSession('CABT bridge exited.'));
@@ -186,27 +208,37 @@ export class LocalEngineController {
     return { ok: false, error: 'Replay loading is not wired for the CABT adapter yet.' };
   }
 
+  tagLatestTrace(payload: TraceTagPayload): TraceTagResponse {
+    return tagLatestHumanTrace(payload);
+  }
+
   close(): void {
     this.bridge.close();
     this.invalidateSession('CABT bridge closed.');
   }
 
   private async start(payload: any): Promise<EngineResponse> {
+    const playerControls = normalizePlayerControls(payload);
     const player1Deck = resolveDeck(payload?.player1?.deck ?? [], 'Your deck');
-    const player2Deck = resolveDeck(payload?.player2?.deck ?? [], 'AI opponent deck');
-    const agentPath = agentPathForId(payload?.player2?.agentId);
+    const player2Deck = resolveDeck(payload?.player2?.deck ?? [], 'Player 2 deck');
+    const agentPaths = [
+      playerControls[0] === 'agent' ? agentPathForId(payload?.player1?.agentId) : undefined,
+      playerControls[1] === 'agent' ? agentPathForId(payload?.player2?.agentId) : undefined,
+    ];
     this.bridge.stop();
     this.sessionId = createSessionId();
     this.pendingRetreatTarget = null;
+    this.playerControls = playerControls;
     const response = await this.bridge.request({
       command: 'start',
       deck0: player1Deck,
       deck1: player2Deck,
-      agentPath,
+      agentPaths,
+      agentControlled: playerControls.map((control) => control === 'agent'),
     }, { allowStart: true });
     this.applyBridgeResponse(response);
-    this.traceRecorder.start(this.sessionId, agentPath);
-    this.logs = [{ id: this.logId++, message: `Started real CABT match${agentPath ? ` against ${agentPath}` : ''}.` }];
+    this.traceRecorder.start(this.sessionId, { agentPaths, playerControls });
+    this.logs = [{ id: this.logId++, message: `Started real CABT match (${controlLabel(playerControls[0])} vs ${controlLabel(playerControls[1])}).` }];
     return this.viewResponse();
   }
 
@@ -247,7 +279,7 @@ export class LocalEngineController {
       throw new Error(`Selection must contain ${select.minCount}-${select.maxCount} option(s).`);
     }
     validateSelectionIndexes(select, selection);
-    const traceStep = this.traceRecorder.record(this.observation, selection);
+    const traceStep = this.recordTraceSelection(selection);
     const response = await this.bridge.request({
       command: 'select',
       selection,
@@ -286,7 +318,7 @@ export class LocalEngineController {
       if (optionIndex < 0) {
         break;
       }
-      const traceStep = this.traceRecorder.record(this.observation, [optionIndex]);
+      const traceStep = this.recordTraceSelection([optionIndex]);
       const response = await this.bridge.request({
         command: 'select',
         selection: [optionIndex],
@@ -389,13 +421,25 @@ export class LocalEngineController {
     }
 
     this.pendingRetreatTarget = null;
-    const traceStep = this.traceRecorder.record(this.observation, [targetIndex]);
+    const traceStep = this.recordTraceSelection([targetIndex]);
     const response = await this.bridge.request({
       command: 'select',
       selection: [targetIndex],
     });
     this.applyBridgeResponse(response);
     this.traceRecorder.recordOutcome(traceStep, this.observation);
+  }
+
+  private recordTraceSelection(selection: number[]): number | null {
+    const player = this.observation?.current?.yourIndex;
+    if (!this.isSelfControlled(player)) {
+      return null;
+    }
+    return this.traceRecorder.record(this.observation, selection);
+  }
+
+  private isSelfControlled(playerIndex: number | undefined): boolean {
+    return playerIndex === 0 || playerIndex === 1 ? this.playerControls[playerIndex] === 'self' : false;
   }
 
   private findPendingRetreatTargetOption(): number {
@@ -567,7 +611,10 @@ class HumanTraceRecorder {
   private filePath = '';
   private decisionCount = 0;
 
-  start(sessionId: string, agentPath?: string): void {
+  start(
+    sessionId: string,
+    metadata: { agentPaths?: Array<string | undefined>; playerControls?: [PlayerControl, PlayerControl] } = {},
+  ): void {
     this.close();
     if (!traceEnabled()) {
       return;
@@ -585,7 +632,8 @@ class HumanTraceRecorder {
           tool: 'cabt-viewer',
           reviewer: process.env.CABT_TRACE_REVIEWER || 'local-reviewer',
           runId: traceId,
-          ...(agentPath ? { agentPath } : {}),
+          ...(metadata.agentPaths?.some(Boolean) ? { agentPaths: metadata.agentPaths } : {}),
+          ...(metadata.playerControls ? { playerControls: metadata.playerControls } : {}),
         },
         trust: traceTrust(),
         confidence: traceConfidence(),
@@ -612,6 +660,7 @@ class HumanTraceRecorder {
       const step = this.decisionCount;
       segment.decisions.push({
         step,
+        decisionSource: 'human',
         activePlayer: player,
         turnActionIndex: Number.isInteger(current.turnActionCount) ? current.turnActionCount : this.decisionCount,
         context: select.context,
@@ -792,9 +841,7 @@ function bridgeProcessCommand(): { command: string; args: string[] } {
     return { command: process.env.PYTHON ?? 'python3', args: [BRIDGE_PATH] };
   }
   const dockerBridgePath = `/workspace/${toPosixPath(path.relative(WORKSPACE_ROOT, BRIDGE_PATH))}`;
-  const sampleSubmissionDir = process.env.CABT_SAMPLE_SUBMISSION_DIR
-    ? path.resolve(process.env.CABT_SAMPLE_SUBMISSION_DIR)
-    : '';
+  const sampleSubmissionDir = sampleSubmissionDirectory();
   const sampleSubmissionArgs = sampleSubmissionDir
     ? [
         '-v',
@@ -821,6 +868,20 @@ function bridgeProcessCommand(): { command: string; args: string[] } {
       dockerBridgePath,
     ],
   };
+}
+
+function sampleSubmissionDirectory(): string {
+  if (process.env.CABT_SAMPLE_SUBMISSION_DIR) {
+    return path.resolve(process.env.CABT_SAMPLE_SUBMISSION_DIR);
+  }
+
+  const candidates = [
+    path.join(FRONTEND_ROOT, 'sample_submission'),
+    process.env.HOME
+      ? path.join(process.env.HOME, 'Downloads', 'pokemon-tcg-ai-battle', 'sample_submission')
+      : '',
+  ].filter(Boolean);
+  return candidates.find((candidate) => fs.existsSync(path.join(candidate, 'cg', 'api.py'))) ?? '';
 }
 
 function toPosixPath(value: string): string {
@@ -860,6 +921,161 @@ function traceConfidence(): number {
   return Math.max(1, Math.min(5, Math.round(raw)));
 }
 
+function tagLatestHumanTrace(payload: TraceTagPayload): TraceTagResponse {
+  try {
+    const tag = normalizeTraceTagPayload(payload);
+    if (!tag.trust && tag.confidence === undefined && !tag.note && !tag.tags.length) {
+      throw new Error('Choose at least one trace annotation field.');
+    }
+    const tracePath = latestTracePath();
+    const records = readTraceRecords(tracePath);
+    const index = records.length - 1;
+    const updated = tagTraceRecord(records[index], tag);
+    const nextRecords = [...records];
+    nextRecords[index] = updated;
+    writeTraceRecords(tracePath, nextRecords);
+    return {
+      ok: true,
+      trust: typeof updated.trust === 'string' ? updated.trust : undefined,
+      confidence: typeof updated.confidence === 'number' ? updated.confidence : undefined,
+      qualityNoteCount: Array.isArray(updated.qualityNotes) ? updated.qualityNotes.length : 0,
+      planTagCount: updated.planTags && typeof updated.planTags === 'object' ? Object.keys(updated.planTags).length : 0,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function normalizeTraceTagPayload(payload: TraceTagPayload) {
+  const trust = typeof payload.trust === 'string' && payload.trust.trim()
+    ? payload.trust.trim()
+    : undefined;
+  if (trust && !TRACE_TRUST_TIERS.has(trust)) {
+    throw new Error('Trace trust must be gold, silver, bronze, debug, or unreliable.');
+  }
+
+  const confidence = payload.confidence === undefined || payload.confidence === null || payload.confidence === ''
+    ? undefined
+    : Number(payload.confidence);
+  if (confidence !== undefined && (!Number.isInteger(confidence) || confidence < 1 || confidence > 5)) {
+    throw new Error('Trace confidence must be an integer from 1 to 5.');
+  }
+
+  const note = typeof payload.note === 'string' && payload.note.trim()
+    ? payload.note.trim()
+    : undefined;
+  const tags = parseTraceTags(payload.tags);
+  return { trust, confidence, note, tags };
+}
+
+function parseTraceTags(raw: unknown): string[] {
+  const values = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? raw.split(',')
+      : [];
+  const tags = values.map((item) => String(item).trim()).filter(Boolean);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const tag of tags) {
+    validateTraceTagSlug(tag);
+    if (!seen.has(tag)) {
+      result.push(tag);
+      seen.add(tag);
+    }
+  }
+  return result;
+}
+
+function validateTraceTagSlug(value: string): void {
+  if (value.length > 64 || !/^[a-zA-Z0-9_.-]+$/.test(value)) {
+    throw new Error('Trace tags must be short slugs using letters, numbers, underscore, dash, or dot.');
+  }
+}
+
+function latestTracePath(): string {
+  const directory = traceDirectory();
+  if (!fs.existsSync(directory)) {
+    throw new Error('No private trace directory exists yet.');
+  }
+  const files = fs.readdirSync(directory)
+    .filter((file) => /^cabt-[a-zA-Z0-9._-]+\.jsonl$/.test(file))
+    .map((file) => path.join(directory, file))
+    .filter((file) => fs.statSync(file).isFile());
+  if (!files.length) {
+    throw new Error('No CABT trace files are available to tag.');
+  }
+  return files.sort((left, right) => {
+    const leftStat = fs.statSync(left);
+    const rightStat = fs.statSync(right);
+    return rightStat.mtimeMs - leftStat.mtimeMs || right.localeCompare(left);
+  })[0];
+}
+
+function readTraceRecords(filePath: string): Array<Record<string, any>> {
+  ensurePrivateTraceFile(filePath);
+  const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean);
+  if (!lines.length) {
+    throw new Error('Trace file has no records.');
+  }
+  return lines.map((line) => JSON.parse(line) as Record<string, any>);
+}
+
+function writeTraceRecords(filePath: string, records: Array<Record<string, any>>): void {
+  ensurePrivateTraceFile(filePath);
+  const tmp = `${filePath}.tmp`;
+  fs.writeFileSync(tmp, records.map((record) => JSON.stringify(record)).join('\n') + '\n', 'utf8');
+  fs.renameSync(tmp, filePath);
+}
+
+function ensurePrivateTraceFile(filePath: string): void {
+  const resolved = path.resolve(filePath);
+  const directory = traceDirectory();
+  if (!resolved.startsWith(`${directory}${path.sep}`) || !resolved.endsWith('.jsonl')) {
+    throw new Error('Trace annotations are only allowed for private CABT JSONL trace files.');
+  }
+}
+
+function tagTraceRecord(record: Record<string, any>, tag: ReturnType<typeof normalizeTraceTagPayload>): Record<string, any> {
+  if (record.kind !== 'human_play_trace') {
+    throw new Error('Latest trace is not a human play trace.');
+  }
+  const updated = jsonClone(record);
+  if (tag.trust) {
+    updated.trust = tag.trust;
+  }
+  if (tag.confidence !== undefined) {
+    updated.confidence = tag.confidence;
+  }
+  if (tag.note) {
+    const notes = Array.isArray(updated.qualityNotes) ? updated.qualityNotes : [];
+    notes.push({
+      createdAt: new Date().toISOString(),
+      source: 'cabt-ui',
+      note: tag.note,
+    });
+    updated.qualityNotes = notes;
+  }
+  if (tag.tags.length) {
+    const planTags = updated.planTags && typeof updated.planTags === 'object' && !Array.isArray(updated.planTags)
+      ? updated.planTags
+      : {};
+    const prior = Array.isArray(planTags.tags) ? planTags.tags.filter((value: unknown): value is string => typeof value === 'string') : [];
+    const merged = [...prior];
+    for (const item of tag.tags) {
+      if (!merged.includes(item)) {
+        merged.push(item);
+      }
+    }
+    planTags.tags = merged;
+    updated.planTags = planTags;
+  }
+  return updated;
+}
+
 function sanitizeFileName(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
@@ -897,6 +1113,20 @@ function validateSelectionIndexes(select: CabtSelectData, selection: number[]): 
 
 function createSessionId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizePlayerControls(payload: any): [PlayerControl, PlayerControl] {
+  const player1 = normalizePlayerControl(payload?.player1?.control, 'self');
+  const player2 = normalizePlayerControl(payload?.player2?.control, 'agent');
+  return [player1, player2];
+}
+
+function normalizePlayerControl(value: unknown, fallback: PlayerControl): PlayerControl {
+  return value === 'self' || value === 'agent' ? value : fallback;
+}
+
+function controlLabel(control: PlayerControl): string {
+  return control === 'agent' ? 'Agent' : 'Self';
 }
 
 function resolveDeck(cards: unknown[], label: string): number[] {

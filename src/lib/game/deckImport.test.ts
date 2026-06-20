@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCabtDeckList, parseDeckList, SAMPLE_DECK } from './deckImport';
+import { formatCabtDeckList, parseDeckList, SAMPLE_DECK, validateParsedDeck } from './deckImport';
 
 describe('deck import', () => {
   it('skips section count headers and expands the default deck to 60 cards', () => {
@@ -60,5 +60,24 @@ Trainer: 2
 Energy: 54
 54 Basic {W} Energy SVE 3`);
     expect(parseDeckList(formatted).cards).toHaveLength(60);
+  });
+
+  it('validates imported names against the local CABT card table', () => {
+    const parsed = parseDeckList('1 Crushing Hammer POR 71');
+
+    expect(validateParsedDeck(parsed, [
+      { id: 1120, name: 'Crushing Hammer', set: 'SVI', setNumber: '168', cardType: 1 },
+    ])).toEqual([
+      'Deck must contain exactly 60 cards, found 1.',
+      'Line 1: could not resolve "1 Crushing Hammer POR 71" to a CABT card ID. Supported prints: Crushing Hammer SVI 168.',
+    ]);
+  });
+
+  it('matches deck apostrophes against card-table curly apostrophes', () => {
+    const parsed = parseDeckList("1 Xerosic's Machinations SFA 64");
+
+    expect(validateParsedDeck(parsed, [
+      { id: 1197, name: 'Xerosic’s Machinations', set: 'SFA', setNumber: '64', cardType: 1 },
+    ])).toEqual(['Deck must contain exactly 60 cards, found 1.']);
   });
 });

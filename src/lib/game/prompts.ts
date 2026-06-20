@@ -95,11 +95,16 @@ export function autoResolvablePromptResult(prompt: PromptView | undefined, game:
   return undefined;
 }
 
-export function shouldAutoResolvePrompt(prompt: PromptView | undefined, autoConfirmPrompts: boolean, result: unknown): boolean {
+export function shouldAutoResolvePrompt(
+  prompt: PromptView | undefined,
+  autoConfirmPrompts: boolean,
+  result: unknown,
+  force = false,
+): boolean {
   if (!prompt || result === undefined) {
     return false;
   }
-  return isForcedAutoResolvePrompt(prompt) || autoConfirmPrompts;
+  return isForcedAutoResolvePrompt(prompt) || autoConfirmPrompts || force;
 }
 
 export function isForcedAutoResolvePrompt(prompt: PromptView | undefined): boolean {

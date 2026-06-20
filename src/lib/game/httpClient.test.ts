@@ -63,4 +63,56 @@ describe('hosted headless requests', () => {
       },
     });
   });
+
+  it('sends player control and agent ids when starting a local CABT game', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ json: async () => ({ ok: true, view, sessionId: 'session-456' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await localGameApi.start(['A'], ['B'], {
+      player1Control: 'agent',
+      player2Control: 'self',
+      player1AgentId: 'p1-agent',
+      player2AgentId: 'p2-agent',
+    });
+
+    expect(requestBody(fetchMock, 0)).toEqual({
+      type: 'startGame',
+      payload: {
+        player1: {
+          name: 'Player 1',
+          deck: ['A'],
+          control: 'agent',
+          agentId: 'p1-agent',
+        },
+        player2: {
+          name: 'Player 2',
+          deck: ['B'],
+          control: 'self',
+          agentId: 'p2-agent',
+        },
+      },
+    });
+  });
+
+  it('posts latest-trace annotations without requiring a session id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({ ok: true, trust: 'gold', confidence: 5, qualityNoteCount: 1, planTagCount: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await localGameApi.tagLatestTrace({
+      trust: 'gold',
+      confidence: 5,
+      note: 'mirror_second_perfect_win',
+      tags: 'mirror,perfect',
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/local-engine/traces/tag-latest');
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
+      trust: 'gold',
+      confidence: 5,
+      note: 'mirror_second_perfect_win',
+      tags: 'mirror,perfect',
+    });
+  });
 });
