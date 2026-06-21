@@ -32,7 +32,9 @@ export async function loadGameLogs(): Promise<GameLogEntry[]> {
   // by id. A missing local manifest 404s to [] and is harmless.
   const [demos, locals] = await Promise.all([
     loadJsonList<GameLogEntry>('/game-logs/logs.json', 'logs'),
-    loadJsonList<GameLogEntry>('/game-logs/local-logs.json', 'logs'),
+    // The local manifest is best-effort: a corrupt or malformed local-logs.json
+    // must not break the tracked demo catalog.
+    loadJsonList<GameLogEntry>('/game-logs/local-logs.json', 'logs').catch(() => []),
   ]);
   const merged: GameLogEntry[] = [];
   const seen = new Set<string>();
