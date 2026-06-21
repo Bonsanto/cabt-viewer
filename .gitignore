@@ -12,3 +12,7 @@ private/
 outputs/
 sample_submission
 data
+
+# Locally recorded match logs are private competition session data.
+# Keep demo fixtures (cabt-match.json, kaggle-context.json) tracked; ignore recordings.
+public/game-logs/local-*.json

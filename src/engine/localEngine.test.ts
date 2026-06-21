@@ -844,6 +844,100 @@ describe('LocalEngineController', () => {
     }
   });
 
+  it('tags the active session trace even when a newer trace file exists', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cabt-traces-'));
+    const traceDir = path.join(root, 'private', 'traces');
+    const oldTraceDir = process.env.CABT_TRACE_DIR;
+    const oldTraceEnabled = process.env.CABT_TRACE_ENABLED;
+    process.env.CABT_TRACE_DIR = traceDir;
+    process.env.CABT_TRACE_ENABLED = '1';
+    try {
+      fs.mkdirSync(traceDir, { recursive: true });
+      const engine = new LocalEngineController() as any;
+      const current = {
+        turn: 3,
+        turnActionCount: 1,
+        yourIndex: 0,
+        firstPlayer: 0,
+        supporterPlayed: false,
+        stadiumPlayed: false,
+        energyAttached: false,
+        retreated: false,
+        result: -1,
+        stadium: [],
+        looking: null,
+        players: [],
+      };
+      const observation = {
+        select: {
+          type: 0,
+          context: CabtSelectContext.MAIN,
+          minCount: 1,
+          maxCount: 1,
+          remainDamageCounter: 0,
+          remainEnergyCost: 0,
+          option: [{ type: CabtOptionType.ATTACK, attackId: 1 }],
+          deck: null,
+          contextCard: null,
+          effect: null,
+        },
+        logs: [],
+        current,
+      };
+      // Active session writes its own trace file.
+      engine.traceRecorder.start('active-session');
+      engine.traceRecorder.record(observation, [0]);
+      const activePath = path.join(traceDir, 'cabt-active-session.jsonl');
+      expect(fs.existsSync(activePath)).toBe(true);
+
+      // A decoy trace with a strictly newer mtime than the active file. The old
+      // mtime-based lookup would mistakenly tag this one.
+      const decoyPath = path.join(traceDir, 'cabt-decoy.jsonl');
+      fs.writeFileSync(decoyPath, `${JSON.stringify({
+        schemaVersion: 1,
+        kind: 'human_play_trace',
+        traceId: 'cabt-decoy',
+        createdAt: '2026-06-20T00:00:00Z',
+        source: { tool: 'cabt-viewer', reviewer: 'local-reviewer', runId: 'cabt-decoy' },
+        trust: 'silver',
+        confidence: 4,
+        segments: [],
+      })}\n`, 'utf8');
+      const future = new Date(Date.now() + 60_000);
+      fs.utimesSync(decoyPath, future, future);
+
+      const response = engine.tagLatestTrace({
+        trust: 'gold',
+        confidence: 5,
+        note: 'going_first',
+        tags: 'mirror',
+      });
+      expect(response.ok).toBe(true);
+
+      const activeTrace = JSON.parse(fs.readFileSync(activePath, 'utf8').trim());
+      expect(activeTrace.trust).toBe('gold');
+      expect(activeTrace.confidence).toBe(5);
+      expect(activeTrace.qualityNotes[0]).toMatchObject({ note: 'going_first' });
+
+      // Decoy is untouched.
+      const decoyTrace = JSON.parse(fs.readFileSync(decoyPath, 'utf8').trim());
+      expect(decoyTrace.trust).toBe('silver');
+      expect(decoyTrace.confidence).toBe(4);
+    } finally {
+      if (oldTraceDir === undefined) {
+        delete process.env.CABT_TRACE_DIR;
+      } else {
+        process.env.CABT_TRACE_DIR = oldTraceDir;
+      }
+      if (oldTraceEnabled === undefined) {
+        delete process.env.CABT_TRACE_ENABLED;
+      } else {
+        process.env.CABT_TRACE_ENABLED = oldTraceEnabled;
+      }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('records terminal post-action outcomes for completed games', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cabt-traces-'));
     const traceDir = path.join(root, 'private', 'traces');

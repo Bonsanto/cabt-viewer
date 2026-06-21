@@ -138,7 +138,9 @@ const FRONTEND_ROOT = path.resolve(__dirname, '..', '..');
 const WORKSPACE_ROOT = path.resolve(FRONTEND_ROOT, '..');
 const BRIDGE_PATH = path.join(FRONTEND_ROOT, 'src', 'engine', 'cabt_bridge.py');
 const GAME_LOGS_DIR = path.join(FRONTEND_ROOT, 'public', 'game-logs');
-const GAME_LOGS_MANIFEST = path.join(GAME_LOGS_DIR, 'logs.json');
+// Private locally-recorded matches go in a separate, git-ignored manifest so
+// the tracked logs.json (demo fixtures) is never polluted with session data.
+const GAME_LOGS_LOCAL_MANIFEST = path.join(GAME_LOGS_DIR, 'local-logs.json');
 
 export class LocalEngineController {
   private readonly demo = new CabtDemoController();
@@ -227,7 +229,17 @@ export class LocalEngineController {
   }
 
   tagLatestTrace(payload: TraceTagPayload): TraceTagResponse {
-    return tagLatestHumanTrace(payload);
+    // Target the file the active session is actually writing, not whichever
+    // cabt-*.jsonl happens to have the newest mtime. Otherwise an out-of-order
+    // write (a later session, or a flush) sends the tag to the wrong trace and
+    // leaves the just-played game untagged.
+    const activePath = this.traceRecorder.currentFilePath();
+    const response = tagLatestHumanTrace(payload, activePath || undefined);
+    if (response.ok && activePath) {
+      // Keep the in-memory trace in sync so any later flush preserves the tag.
+      this.traceRecorder.reloadFromDisk();
+    }
+    return response;
   }
 
   saveReplay(): SaveReplayResponse {
@@ -892,6 +904,28 @@ class HumanTraceRecorder {
     this.decisionCount = 0;
   }
 
+  // Path of the file the current session is recording, or '' when no session
+  // is active. Used to tag the right trace instead of guessing by mtime.
+  currentFilePath(): string {
+    return this.trace ? this.filePath : '';
+  }
+
+  // Re-read the trace after an out-of-band tag write so a later flush does not
+  // clobber the freshly written trust/confidence/notes/tags.
+  reloadFromDisk(): void {
+    if (!this.trace || !this.filePath) {
+      return;
+    }
+    try {
+      const lines = fs.readFileSync(this.filePath, 'utf8').split(/\r?\n/).filter(Boolean);
+      if (lines.length) {
+        this.trace = JSON.parse(lines[lines.length - 1]) as HumanTraceRecord;
+      }
+    } catch {
+      // Keep the in-memory trace if the tagged file cannot be reloaded.
+    }
+  }
+
   private segmentFor(turn: number, player: number): HumanTraceRecord['segments'][number] {
     const current = this.trace?.segments.at(-1);
     if (current && current.turn === turn && current.player === player) {
@@ -1109,13 +1143,13 @@ function traceConfidence(): number {
   return Math.max(1, Math.min(5, Math.round(raw)));
 }
 
-function tagLatestHumanTrace(payload: TraceTagPayload): TraceTagResponse {
+function tagLatestHumanTrace(payload: TraceTagPayload, targetPath?: string): TraceTagResponse {
   try {
     const tag = normalizeTraceTagPayload(payload);
     if (!tag.trust && tag.confidence === undefined && !tag.note && !tag.tags.length) {
       throw new Error('Choose at least one trace annotation field.');
     }
-    const tracePath = latestTracePath();
+    const tracePath = targetPath ?? latestTracePath();
     const records = readTraceRecords(tracePath);
     const index = records.length - 1;
     const updated = tagTraceRecord(records[index], tag);
@@ -1335,15 +1369,15 @@ function writeGameLogManifest(entry: {
   const manifest = readGameLogManifest();
   const logs = Array.isArray(manifest.logs) ? manifest.logs.filter((item: any) => item?.id !== entry.id) : [];
   manifest.logs = [entry, ...logs];
-  fs.writeFileSync(GAME_LOGS_MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+  fs.writeFileSync(GAME_LOGS_LOCAL_MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function readGameLogManifest(): { logs: unknown[] } {
-  if (!fs.existsSync(GAME_LOGS_MANIFEST)) {
+  if (!fs.existsSync(GAME_LOGS_LOCAL_MANIFEST)) {
     return { logs: [] };
   }
   try {
-    const manifest = JSON.parse(fs.readFileSync(GAME_LOGS_MANIFEST, 'utf8'));
+    const manifest = JSON.parse(fs.readFileSync(GAME_LOGS_LOCAL_MANIFEST, 'utf8'));
     return manifest && typeof manifest === 'object' && Array.isArray(manifest.logs) ? manifest : { logs: [] };
   } catch {
     return { logs: [] };
