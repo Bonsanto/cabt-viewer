@@ -17,6 +17,13 @@ type StartOptions = {
   player2AgentId?: string;
 };
 
+export type SaveReplayResponse = {
+  ok: boolean;
+  file?: string;
+  id?: string;
+  error?: string;
+};
+
 export type TraceTagRequest = {
   trust?: string;
   confidence?: number;
@@ -139,10 +146,15 @@ function hostedAvailableActionsOptions(command: Command): { availableActionsScop
 
 export const localGameApi: GameCommandApi & {
   start(player1Deck: string[], player2Deck: string[], options?: StartOptions): Promise<EngineResponse>;
+  saveReplay(): Promise<SaveReplayResponse>;
   state(): Promise<EngineResponse>;
   tagLatestTrace(request: TraceTagRequest): Promise<TraceTagResponse>;
 } = {
-  start(player1Deck: string[], player2Deck: string[], options: StartOptions = {}) {
+  start(
+    player1Deck: string[],
+    player2Deck: string[],
+    options: StartOptions = {},
+  ) {
     const player1Control = options.player1Control ?? 'self';
     const player2Control = options.player2Control ?? 'agent';
     return send({
@@ -166,6 +178,17 @@ export const localGameApi: GameCommandApi & {
 
   state() {
     return send({ type: 'state' });
+  },
+
+  async saveReplay() {
+    const response = await fetch('/local-engine/save-replay', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+    });
+    return await response.json() as SaveReplayResponse;
   },
 
   async tagLatestTrace(request: TraceTagRequest) {

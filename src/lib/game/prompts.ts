@@ -99,12 +99,24 @@ export function shouldAutoResolvePrompt(
   prompt: PromptView | undefined,
   autoConfirmPrompts: boolean,
   result: unknown,
-  force = false,
+  allowForcedAutoResolve?: boolean,
 ): boolean {
   if (!prompt || result === undefined) {
     return false;
   }
-  return isForcedAutoResolvePrompt(prompt) || autoConfirmPrompts || force;
+  if (prompt.fields.playbackOnly === true) {
+    return false;
+  }
+  if (prompt.className === 'ShuffleDeckPrompt') {
+    return true;
+  }
+  if (isForcedAutoResolvePrompt(prompt)) {
+    return allowForcedAutoResolve !== false;
+  }
+  if (allowForcedAutoResolve) {
+    return true;
+  }
+  return !!(autoConfirmPrompts || allowForcedAutoResolve);
 }
 
 export function isForcedAutoResolvePrompt(prompt: PromptView | undefined): boolean {

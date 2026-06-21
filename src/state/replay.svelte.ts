@@ -8,6 +8,10 @@ class ReplayStore {
   loading = $state(false);
   error = $state('');
   copiedForkPoint = $state(false);
+  isPlaying = $state(false);
+
+  private playbackTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly playbackDelayMs = 850;
 
   get currentStep(): ReplayStep | null {
     return this.replay?.steps[this.stepIndex] ?? null;
@@ -30,6 +34,7 @@ class ReplayStore {
     if (this.loading) {
       return;
     }
+    this.pause();
     this.loading = true;
     this.error = '';
     this.copiedForkPoint = false;
@@ -46,6 +51,7 @@ class ReplayStore {
   }
 
   clear(): void {
+    this.pause();
     this.replay = null;
     this.stepIndex = 0;
     this.loading = false;
@@ -56,6 +62,9 @@ class ReplayStore {
   setStep(index: number): void {
     this.stepIndex = clampIndex(index, this.maxStepIndex);
     this.copiedForkPoint = false;
+    if (this.stepIndex >= this.maxStepIndex) {
+      this.pause();
+    }
   }
 
   nextStep(): void {
@@ -72,6 +81,37 @@ class ReplayStore {
 
   lastStep(): void {
     this.setStep(this.maxStepIndex);
+  }
+
+  play(): void {
+    if (!this.replay || this.maxStepIndex <= 0) {
+      return;
+    }
+    if (this.stepIndex >= this.maxStepIndex) {
+      this.stepIndex = 0;
+    }
+    this.clearPlaybackTimer();
+    this.isPlaying = true;
+    this.playbackTimer = setInterval(() => {
+      if (this.stepIndex >= this.maxStepIndex) {
+        this.pause();
+        return;
+      }
+      this.nextStep();
+    }, this.playbackDelayMs);
+  }
+
+  pause(): void {
+    this.clearPlaybackTimer();
+    this.isPlaying = false;
+  }
+
+  togglePlayback(): void {
+    if (this.isPlaying) {
+      this.pause();
+      return;
+    }
+    this.play();
   }
 
   setStateIndex(stateIndex: number): void {
@@ -112,6 +152,13 @@ class ReplayStore {
       turn: step.turn,
     }));
     this.copiedForkPoint = true;
+  }
+
+  private clearPlaybackTimer(): void {
+    if (this.playbackTimer) {
+      clearInterval(this.playbackTimer);
+      this.playbackTimer = null;
+    }
   }
 }
 

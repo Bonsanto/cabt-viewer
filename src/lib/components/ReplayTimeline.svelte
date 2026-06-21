@@ -6,12 +6,15 @@
     step: ReplayStep;
     stepIndex: number;
     copiedForkPoint?: boolean;
+    isPlaying?: boolean;
     setStep: (index: number) => void;
     setStateIndex: (index: number) => void;
     previousStep: () => void;
     nextStep: () => void;
     firstStep: () => void;
     lastStep: () => void;
+    togglePlayback: () => void;
+    backToReplayHome: () => void;
     copyForkPoint: () => void;
   };
 
@@ -20,12 +23,15 @@
     step,
     stepIndex,
     copiedForkPoint = false,
+    isPlaying = false,
     setStep,
     setStateIndex,
     previousStep,
     nextStep,
     firstStep,
     lastStep,
+    togglePlayback,
+    backToReplayHome,
     copyForkPoint,
   }: Props = $props();
 
@@ -54,6 +60,8 @@
   }
 </script>
 
+<button class="replay-back-button" aria-label="Back to replay list" onclick={backToReplayHome}>Back</button>
+
 <section class="replay-dock" aria-label="Replay timeline">
   <div class="replay-caption" title={step.label}>
     <span>{step.label}</span>
@@ -61,6 +69,19 @@
   <div class="replay-controls" aria-label="Replay playback controls">
     <button aria-label="First action" onclick={firstStep} disabled={stepIndex === 0}>|&lt;</button>
     <button aria-label="Previous action" onclick={previousStep} disabled={stepIndex === 0}>&lt;</button>
+    <button
+      class="playback-toggle"
+      aria-label={isPlaying ? 'Pause replay' : 'Play replay'}
+      aria-pressed={isPlaying}
+      onclick={togglePlayback}
+      disabled={maxStepIndex === 0}
+    >
+      {#if isPlaying}
+        <span class="pause-icon" aria-hidden="true"><span></span><span></span></span>
+      {:else}
+        <span class="play-icon" aria-hidden="true"></span>
+      {/if}
+    </button>
     <input
       aria-label="Action step"
       type="range"
@@ -124,6 +145,24 @@
     color: var(--text-primary);
     box-shadow: var(--surface-toolbar-shadow);
     backdrop-filter: blur(var(--backdrop-blur));
+  }
+
+  .replay-back-button {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    z-index: 16;
+    height: 34px;
+    min-width: 64px;
+    padding: 0 14px;
+    border: 1px solid var(--button-border);
+    border-radius: 5px;
+    background: var(--button-bg);
+    color: var(--button-text);
+    box-shadow: var(--surface-toolbar-shadow);
+    backdrop-filter: blur(var(--backdrop-blur));
+    font-size: 12px;
+    font-weight: 850;
   }
 
   .replay-caption {
@@ -202,7 +241,7 @@
   .replay-controls {
     width: 100%;
     display: grid;
-    grid-template-columns: 32px 32px minmax(0, 1fr) 32px 32px;
+    grid-template-columns: 32px 32px 36px minmax(0, 1fr) 32px 32px;
     align-items: center;
     gap: 8px;
   }
@@ -222,6 +261,34 @@
     width: 32px;
     height: 30px;
     padding: 0;
+  }
+
+  .replay-controls .playback-toggle {
+    width: 36px;
+  }
+
+  .play-icon {
+    display: block;
+    width: 0;
+    height: 0;
+    margin: 0 auto;
+    border-top: 7px solid transparent;
+    border-bottom: 7px solid transparent;
+    border-left: 11px solid currentColor;
+    transform: translateX(1px);
+  }
+
+  .pause-icon {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .pause-icon span {
+    width: 4px;
+    height: 14px;
+    border-radius: 1px;
+    background: currentColor;
   }
 
   .state-controls {
@@ -283,6 +350,14 @@
 
     .replay-details {
       display: none;
+    }
+
+    .replay-back-button {
+      top: 10px;
+      left: 10px;
+      height: 32px;
+      min-width: 60px;
+      padding: 0 12px;
     }
   }
 </style>

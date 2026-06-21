@@ -12,6 +12,8 @@
     autoConfirmPrompts: boolean;
     debugZones: boolean;
     showLogs: boolean;
+    animateActions: boolean;
+    actionStepDelayMs: number;
     themePreference: ThemePreference;
     busy?: boolean;
     promptActive?: boolean;
@@ -36,6 +38,8 @@
     autoConfirmPrompts = $bindable(),
     debugZones = $bindable(),
     showLogs = $bindable(),
+    animateActions = $bindable(),
+    actionStepDelayMs = $bindable(),
     themePreference = $bindable(),
     busy = false,
     promptActive = false,
@@ -75,6 +79,22 @@
   <label>
     <input type="checkbox" bind:checked={showLogs} />
     Show logs
+  </label>
+  <label>
+    <input type="checkbox" bind:checked={animateActions} />
+    Step playback
+  </label>
+  <label>
+    Step ms
+    <input
+      class="compact-number"
+      type="number"
+      min="50"
+      max="2500"
+      step="50"
+      bind:value={actionStepDelayMs}
+      disabled={!animateActions}
+    />
   </label>
   <label>
     Theme
@@ -142,6 +162,17 @@
     color: var(--button-text);
     font-size: 10px;
     font-weight: 700;
+  }
+
+  .table-toolbar input.compact-number {
+    min-width: 0;
+    width: 58px;
+    padding: 2px 4px;
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    background: var(--input-bg);
+    color: var(--input-text);
+    font: inherit;
   }
 
   .sidebar-turn-actions {

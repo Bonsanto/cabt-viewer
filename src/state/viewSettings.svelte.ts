@@ -40,6 +40,8 @@ class ViewSettingsStore {
   autoConfirmPrompts = $state(true);
   debugZones = $state(false);
   showLogs = $state(false);
+  animateActions = $state(false);
+  actionStepDelayMs = $state(650);
   viewIndex = $state(0);
   boardTilt = $state(DEFAULT_BOARD_TILT);
   boardPerspective = $state(DEFAULT_BOARD_PERSPECTIVE);

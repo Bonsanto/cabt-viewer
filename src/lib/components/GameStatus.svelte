@@ -4,14 +4,25 @@
     turn: number;
     activePlayerName?: string;
     resultLabel?: string;
+    modeLabel?: string;
     gameFinished?: boolean;
   };
 
-  let { phaseLabel, turn, activePlayerName = '', resultLabel = '', gameFinished = false }: Props = $props();
+  let {
+    phaseLabel,
+    turn,
+    activePlayerName = '',
+    resultLabel = '',
+    modeLabel = '',
+    gameFinished = false,
+  }: Props = $props();
 </script>
 
 <div class="game-status">
   <strong>{resultLabel || phaseLabel}</strong>
+  {#if modeLabel && !gameFinished}
+    <span class="mode">{modeLabel}</span>
+  {/if}
   <span>Turn {turn}</span>
   {#if !gameFinished}
     <span>{activePlayerName}</span>
@@ -41,5 +52,10 @@
 
   .game-status strong {
     color: var(--accent-strong);
+  }
+
+  .mode {
+    color: var(--accent-strong);
+    font-weight: 900;
   }
 </style>

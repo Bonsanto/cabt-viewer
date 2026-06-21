@@ -1,18 +1,21 @@
 <script lang="ts">
   import { labelFor } from '../game/labels';
+  import type { ActionTimelineEvent, LogView } from '../game/types';
 
   type Props = {
-    logs?: Array<{ message: string }>;
+    logs?: LogView[];
+    timeline?: ActionTimelineEvent[];
   };
 
-  let { logs = [] }: Props = $props();
-  let visibleLogs = $derived(logs.slice(-18).reverse());
+  let { logs = [], timeline = [] }: Props = $props();
+  let entries = $derived(timeline.length ? timeline : logs);
+  let visibleEntries = $derived(entries.slice(-18).reverse());
 </script>
 
 <aside class="log-panel">
-  <h2>Log</h2>
-  {#each visibleLogs as log}
-    <p>{labelFor(log.message)}</p>
+  <h2>{timeline.length ? 'Timeline' : 'Log'}</h2>
+  {#each visibleEntries as entry}
+    <p>{labelFor(entry.message)}</p>
   {/each}
 </aside>
 

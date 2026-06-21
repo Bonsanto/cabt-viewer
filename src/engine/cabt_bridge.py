@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 
 FRONTEND_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = FRONTEND_ROOT.parent
 SAMPLE_SUBMISSION = Path(
     os.environ.get(
         "CABT_SAMPLE_SUBMISSION_DIR",
@@ -109,38 +110,42 @@ class Session:
 
         self.obs = obs
         self.active = True
-        self.play_ai_turns()
-        return self.snapshot()
+        auto_steps = self.play_ai_turns()
+        return self.snapshot([obs, *auto_steps])
 
     def select(self, selection: list[int]) -> dict[str, Any]:
         if not self.active:
             raise RuntimeError("No active CABT battle.")
-        self.obs = battle_select(selection)
-        self.play_ai_turns()
-        return self.snapshot()
+        selected_step = battle_select(selection)
+        self.obs = selected_step
+        auto_steps = self.play_ai_turns()
+        return self.snapshot([selected_step, *auto_steps])
 
     def state(self) -> dict[str, Any]:
         return self.snapshot()
 
-    def play_ai_turns(self) -> None:
+    def play_ai_turns(self) -> list[dict[str, Any]]:
+        auto_steps: list[dict[str, Any]] = []
         for _ in range(MAX_AUTO_STEPS):
             if not self.obs:
-                return
+                return auto_steps
             current = self.obs.get("current")
             select = self.obs.get("select")
             if not current or current.get("result", -1) >= 0 or select is None:
-                return
+                return auto_steps
             player_index = current.get("yourIndex")
             if player_index not in (0, 1) or not self.agent_controlled[player_index]:
-                return
+                return auto_steps
             action = self.agents[player_index](self.obs)
             self.obs = battle_select(action)
+            auto_steps.append(self.obs)
         raise RuntimeError(f"AI auto-play limit exceeded ({MAX_AUTO_STEPS} selections).")
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, auto_steps: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         return {
             "ok": True,
             "observation": self.obs,
+            "autoSteps": auto_steps or [],
             "cards": [to_jsonable(card) for card in all_card_data()],
             "attacks": [to_jsonable(attack) for attack in all_attack()],
         }
@@ -183,7 +188,12 @@ def handle(session: Session, message: dict[str, Any]) -> dict[str, Any]:
             agent_paths = [None, message.get("agentPath")]
         if not isinstance(agent_controlled, list):
             agent_controlled = [False, not bool(message.get("manualOpponent"))]
-        return session.start(message["deck0"], message["deck1"], agent_paths, agent_controlled)
+        return session.start(
+            message["deck0"],
+            message["deck1"],
+            agent_paths,
+            agent_controlled,
+        )
     if command == "select":
         return session.select(message["selection"])
     if command == "state":

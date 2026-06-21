@@ -108,7 +108,11 @@
           {#if player1Control === 'agent'}
             <span class="field-row">
               <span>Agent</span>
-              <select bind:value={player1AgentId} disabled={busy || agents.length === 0} aria-label="Player 1 agent">
+              <select
+                bind:value={player1AgentId}
+                disabled={busy || agents.length === 0}
+                aria-label="Player 1 agent"
+              >
                 {#each agents as agent}
                   <option value={agent.id}>{agent.name}</option>
                 {/each}
@@ -162,7 +166,11 @@
           {#if player2Control === 'agent'}
             <span class="field-row">
               <span>Agent</span>
-              <select bind:value={player2AgentId} disabled={busy || agents.length === 0} aria-label="Player 2 agent">
+              <select
+                bind:value={player2AgentId}
+                disabled={busy || agents.length === 0}
+                aria-label="Player 2 agent"
+              >
                 {#each agents as agent}
                   <option value={agent.id}>{agent.name}</option>
                 {/each}

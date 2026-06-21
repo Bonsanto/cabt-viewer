@@ -95,6 +95,18 @@ describe('prompt helpers', () => {
     expect(shouldAutoResolvePrompt(item, false, result, true)).toBe(true);
   });
 
+  it('keeps playback reveal prompts manual even when auto-confirm is enabled', () => {
+    const item = prompt('ConfirmCardsPrompt', {
+      playbackOnly: true,
+      cards: [{ name: 'Basic Water Energy', fullName: 'Basic Water Energy' }],
+    });
+    const result = autoResolvablePromptResult(item, null);
+
+    expect(result).toBe(true);
+    expect(shouldAutoResolvePrompt(item, false, result)).toBe(false);
+    expect(shouldAutoResolvePrompt(item, true, result)).toBe(false);
+  });
+
   it('does not auto-resolve optional card search prompts', () => {
     const item = prompt('ChooseCardsPrompt', { options: { min: 0, max: 1 }, cardList: [{ name: 'Poké Pad hit', fullName: 'Poké Pad hit' }] });
     const result = autoResolvablePromptResult(item, null);
@@ -116,6 +128,27 @@ describe('prompt helpers', () => {
     expect(ordinaryResult).toBeUndefined();
     expect(isForcedAutoResolvePrompt(ordinaryConfirm)).toBe(false);
     expect(shouldAutoResolvePrompt(ordinaryConfirm, true, ordinaryResult)).toBe(false);
+  });
+
+  it('lets manual flows disable forced prompt auto-resolution', () => {
+    const goFirst = { ...prompt('ConfirmPrompt'), message: 'GO_FIRST' };
+    const result = autoResolvablePromptResult(goFirst, null);
+
+    expect(shouldAutoResolvePrompt(goFirst, false, result, false)).toBe(false);
+    expect(shouldAutoResolvePrompt(goFirst, true, result, false)).toBe(false);
+  });
+
+  it('keeps deck shuffles auto-resolved in manual flows', () => {
+    const shuffle = prompt('ShuffleDeckPrompt');
+    const game = {
+      players: [
+        { deckCount: 3 },
+      ],
+    } as GameView;
+    const result = autoResolvablePromptResult(shuffle, game);
+
+    expect(result).toEqual([0, 1, 2]);
+    expect(shouldAutoResolvePrompt(shuffle, false, result, false)).toBe(true);
   });
 });
 

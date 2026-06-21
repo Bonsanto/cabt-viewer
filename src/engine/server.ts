@@ -95,6 +95,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && url.pathname === '/local-engine/save-replay') {
+    const response = controller.saveReplay();
+    writeJson(res, response.ok ? 200 : 400, response);
+    return;
+  }
+
   if (req.method !== 'POST' || url.pathname !== '/local-engine') {
     writeJson(res, 404, { ok: false, error: 'Not found' });
     return;

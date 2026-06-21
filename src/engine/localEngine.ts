@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { CabtDemoController, cabtObservationToGameView, type CabtDataMaps } from '../lib/cabt/demoEngine';
+import { CabtDemoController, cabtCardToView, cabtObservationToGameView, type CabtDataMaps } from '../lib/cabt/demoEngine';
+import { cabtLogsToTimeline } from '../lib/cabt/logFormat';
 import {
   CabtAreaType,
+  CabtLogType,
   CabtOptionType,
   CabtSelectContext,
   type CabtAttack,
@@ -16,7 +18,7 @@ import {
   type CabtSelectData,
 } from '../lib/cabt/types';
 import rawCardRows from '../lib/cabt/cardData.generated.json';
-import type { CardTarget, EngineResponse, LogView } from '../lib/game/types';
+import type { ActionTimelineEvent, CardTarget, EngineResponse, GameView, LogView } from '../lib/game/types';
 import { PlayerType, SlotType } from '../lib/game/types';
 import type { ReplayLoadResponse } from '../lib/game/replay';
 
@@ -62,6 +64,13 @@ type TraceTagResponse = {
   confidence?: number;
   qualityNoteCount?: number;
   planTagCount?: number;
+};
+
+type SaveReplayResponse = {
+  ok: boolean;
+  file?: string;
+  id?: string;
+  error?: string;
 };
 
 type AgentManifest = {
@@ -128,6 +137,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_ROOT = path.resolve(__dirname, '..', '..');
 const WORKSPACE_ROOT = path.resolve(FRONTEND_ROOT, '..');
 const BRIDGE_PATH = path.join(FRONTEND_ROOT, 'src', 'engine', 'cabt_bridge.py');
+const GAME_LOGS_DIR = path.join(FRONTEND_ROOT, 'public', 'game-logs');
+const GAME_LOGS_MANIFEST = path.join(GAME_LOGS_DIR, 'logs.json');
 
 export class LocalEngineController {
   private readonly demo = new CabtDemoController();
@@ -137,8 +148,15 @@ export class LocalEngineController {
   private dataMaps: CabtDataMaps = { cardData: {}, attacks: {} };
   private logs: LogView[] = [];
   private logId = 1;
+  private actionTimeline: ActionTimelineEvent[] = [];
+  private timelineId = 1;
+  private pendingSequence: GameView[] = [];
   private sessionId = '';
   private pendingRetreatTarget: PendingRetreatTarget | null = null;
+  private knownHands = new Map<number, CabtCard[]>();
+  private replayFrames: CabtObservation[] = [];
+  private replayPlayerLabels: [string, string] = ['Player 1', 'Player 2'];
+  private replayModeLabel = 'Self vs Agent';
   private playerControls: [PlayerControl, PlayerControl] = ['self', 'agent'];
 
   constructor() {
@@ -212,6 +230,41 @@ export class LocalEngineController {
     return tagLatestHumanTrace(payload);
   }
 
+  saveReplay(): SaveReplayResponse {
+    if (!this.replayFrames.length) {
+      return { ok: false, error: 'No local match is available to save.' };
+    }
+    const finalFrame = this.replayFrames.at(-1);
+    const winner = finalFrame?.current?.result;
+    const created = new Date();
+    const stamp = compactIsoTimestamp(created);
+    const id = `local-${stamp}`;
+    const file = `${id}.json`;
+    const name = `Local ${this.replayModeLabel} ${created.toLocaleString()}`;
+    const replay = {
+      visualize: this.replayFrames,
+      environment: {
+        id,
+        title: name,
+        info: {
+          TeamNames: this.replayPlayerLabels,
+        },
+      },
+    };
+
+    fs.mkdirSync(GAME_LOGS_DIR, { recursive: true });
+    fs.writeFileSync(path.join(GAME_LOGS_DIR, file), `${JSON.stringify(replay)}\n`);
+    writeGameLogManifest({
+      id,
+      name,
+      file,
+      createdAt: created.toISOString(),
+      players: this.replayPlayerLabels,
+      description: `Saved local ${this.replayModeLabel} match${typeof winner === 'number' && winner >= 0 ? `, result ${winner}` : ''}.`,
+    });
+    return { ok: true, id, file };
+  }
+
   close(): void {
     this.bridge.close();
     this.invalidateSession('CABT bridge closed.');
@@ -228,6 +281,17 @@ export class LocalEngineController {
     this.bridge.stop();
     this.sessionId = createSessionId();
     this.pendingRetreatTarget = null;
+    this.knownHands.clear();
+    this.actionTimeline = [];
+    this.timelineId = 1;
+    this.pendingSequence = [];
+    this.replayFrames = [];
+    this.playerControls = playerControls;
+    this.replayModeLabel = `${controlLabel(playerControls[0])} vs ${controlLabel(playerControls[1])}`;
+    this.replayPlayerLabels = [
+      payload?.player1?.name ?? 'Player 1',
+      payload?.player2?.name ?? 'Player 2',
+    ];
     this.playerControls = playerControls;
     const response = await this.bridge.request({
       command: 'start',
@@ -237,8 +301,11 @@ export class LocalEngineController {
       agentControlled: playerControls.map((control) => control === 'agent'),
     }, { allowStart: true });
     this.applyBridgeResponse(response);
+    this.logs = [{
+      id: this.logId++,
+      message: `Started real CABT match (${this.replayModeLabel}).`,
+    }];
     this.traceRecorder.start(this.sessionId, { agentPaths, playerControls });
-    this.logs = [{ id: this.logId++, message: `Started real CABT match (${controlLabel(playerControls[0])} vs ${controlLabel(playerControls[1])}).` }];
     return this.viewResponse();
   }
 
@@ -458,26 +525,142 @@ export class LocalEngineController {
     if (!response.ok) {
       throw new Error(response.traceback ? `${response.error}\n${response.traceback}` : (response.error ?? 'CABT bridge failed.'));
     }
-    this.observation = response.observation ?? null;
     if (response.cards && response.attacks) {
       this.dataMaps = {
         cardData: Object.fromEntries(response.cards.map((card) => [card.cardId, enrichCardData(card)])),
         attacks: Object.fromEntries(response.attacks.map((attack) => [attack.attackId, attack])),
       };
     }
+    this.pendingSequence = [...this.pendingSequence, ...this.appendTimeline(response)];
+    this.recordReplayFrames(response);
+    this.observation = this.withKnownHands(response.observation ?? null);
   }
 
   private viewResponse(): EngineResponse {
-    return { ok: true, view: this.view(), sessionId: this.sessionId || undefined };
+    const sequence = this.pendingSequence;
+    this.pendingSequence = [];
+    return {
+      ok: true,
+      view: this.view(),
+      sequence: sequence.length ? sequence : undefined,
+      sessionId: this.sessionId || undefined,
+    };
   }
 
   private view() {
-    const view = cabtObservationToGameView(this.observation, this.logs, this.dataMaps);
+    const view = cabtObservationToGameView(this.observation, this.logs, this.dataMaps, this.actionTimeline);
     return {
       ...view,
       capabilities: {
         ...view.capabilities,
         concede: false,
+      },
+    };
+  }
+
+  private recordReplayFrames(response: BridgeResponse): void {
+    const observations = response.autoSteps?.length ? response.autoSteps : response.observation ? [response.observation] : [];
+    for (const observation of observations) {
+      const hydratedObservation = this.withKnownHands(observation);
+      if (hydratedObservation) {
+        this.replayFrames.push(hydratedObservation);
+      }
+    }
+  }
+
+  private withKnownHands(observation: CabtObservation | null): CabtObservation | null {
+    if (!observation?.current) {
+      return observation;
+    }
+    const players = observation.current.players.map((player, playerIndex) => {
+      if (player.hand) {
+        this.knownHands.set(playerIndex, player.hand);
+        return player;
+      }
+      const knownHand = this.knownHands.get(playerIndex);
+      if (!knownHand || knownHand.length !== player.handCount) {
+        return player;
+      }
+      return {
+        ...player,
+        hand: knownHand,
+      };
+    });
+    return {
+      ...observation,
+      current: {
+        ...observation.current,
+        players,
+      },
+    };
+  }
+
+  private appendTimeline(response: BridgeResponse): GameView[] {
+    const observations = response.autoSteps?.length ? response.autoSteps : response.observation ? [response.observation] : [];
+    const sequence: GameView[] = [];
+    for (const observation of observations) {
+      const logs = observation.logs ?? [];
+      if (logs.length) {
+        const result = cabtLogsToTimeline(logs, { nextId: this.timelineId });
+        this.timelineId = result.nextId;
+        this.actionTimeline = [...this.actionTimeline, ...result.events].slice(-200);
+      }
+
+      const hydratedObservation = this.withKnownHands(observation);
+      if (!hydratedObservation) {
+        continue;
+      }
+      const view = cabtObservationToGameView(hydratedObservation, this.logs, this.dataMaps, this.actionTimeline);
+      const revealPrompt = this.revealPromptForLogs(logs, view);
+      if (revealPrompt) {
+        sequence.push({
+          ...view,
+          prompts: [revealPrompt],
+        });
+      }
+      if (!this.isAgentDecisionView(hydratedObservation, view)) {
+        sequence.push(view);
+      }
+    }
+    return sequence;
+  }
+
+  private isAgentDecisionView(observation: CabtObservation, view: GameView) {
+    const playerIndex = observation.current?.yourIndex;
+    return (playerIndex === 0 || playerIndex === 1)
+      && this.playerControls[playerIndex] === 'agent'
+      && view.prompts.length > 0;
+  }
+
+  private revealPromptForLogs(logs: Array<Record<string, unknown>>, view: GameView) {
+    const revealed = logs.filter((log) =>
+      log.type === CabtLogType.MOVE_CARD
+      && Number(log.fromArea) === CabtAreaType.DECK
+      && Number(log.toArea) === CabtAreaType.DISCARD
+      && Number.isFinite(Number(log.cardId)));
+    if (revealed.length < 2) {
+      return null;
+    }
+    const playerIndex = typeof revealed[0].playerIndex === 'number' ? revealed[0].playerIndex : view.activePlayerIndex;
+    return {
+      id: -this.timelineId,
+      className: 'ConfirmCardsPrompt',
+      type: 'playback-reveal',
+      playerId: playerIndex,
+      playerIndex,
+      supported: true,
+      message: 'Revealed and discarded cards',
+      resultSchema: 'confirm',
+      fields: {
+        playbackOnly: true,
+        cards: revealed.map((log, index) => ({
+          ...cabtCardToView({
+            id: Number(log.cardId),
+            serial: typeof log.serial === 'number' ? log.serial : undefined,
+            playerIndex,
+          }, this.dataMaps),
+          index,
+        })),
       },
     };
   }
@@ -602,6 +785,11 @@ export class LocalEngineController {
     this.observation = null;
     this.pendingRetreatTarget = null;
     this.traceRecorder.close();
+    this.knownHands.clear();
+    this.actionTimeline = [];
+    this.timelineId = 1;
+    this.pendingSequence = [];
+    this.replayFrames = [];
     this.logs = [...this.logs, { id: this.logId++, message }];
   }
 }
@@ -1117,6 +1305,9 @@ function createSessionId(): string {
 
 function normalizePlayerControls(payload: any): [PlayerControl, PlayerControl] {
   const player1 = normalizePlayerControl(payload?.player1?.control, 'self');
+  if (payload?.manualOpponent || payload?.player2?.manualOpponent) {
+    return [player1, 'self'];
+  }
   const player2 = normalizePlayerControl(payload?.player2?.control, 'agent');
   return [player1, player2];
 }
@@ -1129,6 +1320,35 @@ function controlLabel(control: PlayerControl): string {
   return control === 'agent' ? 'Agent' : 'Self';
 }
 
+function compactIsoTimestamp(date: Date): string {
+  return date.toISOString().replace(/\D/g, '').slice(0, 14);
+}
+
+function writeGameLogManifest(entry: {
+  id: string;
+  name: string;
+  file: string;
+  createdAt: string;
+  players: string[];
+  description: string;
+}): void {
+  const manifest = readGameLogManifest();
+  const logs = Array.isArray(manifest.logs) ? manifest.logs.filter((item: any) => item?.id !== entry.id) : [];
+  manifest.logs = [entry, ...logs];
+  fs.writeFileSync(GAME_LOGS_MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function readGameLogManifest(): { logs: unknown[] } {
+  if (!fs.existsSync(GAME_LOGS_MANIFEST)) {
+    return { logs: [] };
+  }
+  try {
+    const manifest = JSON.parse(fs.readFileSync(GAME_LOGS_MANIFEST, 'utf8'));
+    return manifest && typeof manifest === 'object' && Array.isArray(manifest.logs) ? manifest : { logs: [] };
+  } catch {
+    return { logs: [] };
+  }
+}
 function resolveDeck(cards: unknown[], label: string): number[] {
   const ids = cards.map((card, index) => resolveCardId(card, `${label} card ${index + 1}`));
   if (ids.length !== 60) {

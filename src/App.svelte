@@ -108,6 +108,9 @@
   let traceTagBusy = $state(false);
   let traceTagMessage = $state('');
   let traceTagError = $state('');
+  let savingReplay = $state(false);
+  let saveReplayMessage = $state('');
+  let saveReplayError = $state('');
   let replayMode = $derived(homeMode === 'logs' && !!replayStore.replay);
   let game = $derived(replayMode ? replayStore.currentView : gameStore.game);
   let error = $derived(homeMode === 'logs' ? replayStore.error : gameStore.error);
@@ -115,6 +118,7 @@
   let sessionBusy = $derived(replayMode ? replayStore.loading : busy);
   let commandApi = $derived<GameCommandApi>(localGameApi);
   let resolvingPrompt = $derived(gameStore.resolvingPrompt);
+  let playingSequence = $derived(gameStore.playingSequence);
   let selectedHand = $derived(selectionStore.selectedHand);
   let draggingHand = $derived(selectionStore.draggingHand);
   let focusedSlot = $derived(selectionStore.focusedSlot);
@@ -199,6 +203,7 @@
   let currentPrompt = $derived(replayMode ? null : game?.prompts[0]);
   let actingPlayerIndex = $derived(currentPrompt?.playerIndex ?? game?.activePlayerIndex ?? 0);
   let actingPlayerIsSelf = $derived(activePlayerControls[actingPlayerIndex] === 'self');
+  let modeLabel = $derived(`${controlLabel(activePlayerControls[0])} vs ${controlLabel(activePlayerControls[1])}`);
   let boardTargetPrompt = $derived(currentPrompt?.className === 'ChoosePokemonPrompt' ? currentPrompt : null);
   let attachPrompt = $derived(currentPrompt?.className === 'AttachEnergyPrompt' ? currentPrompt : null);
   let damagePrompt = $derived(currentPrompt?.className === 'PutDamagePrompt' ? currentPrompt : null);
@@ -260,7 +265,9 @@
     };
   });
   let autoResolvePromptResult = $derived(autoResolvablePromptResult(currentPrompt, game));
-  let autoResolvePrompt = $derived(shouldAutoResolvePrompt(currentPrompt, autoConfirmPrompts, autoResolvePromptResult, !actingPlayerIsSelf));
+  let autoResolvePrompt = $derived(
+    shouldAutoResolvePrompt(currentPrompt, autoConfirmPrompts, autoResolvePromptResult, !actingPlayerIsSelf),
+  );
   let setupPrompt = $derived(
     currentPrompt?.className === 'ChooseCardsPrompt' && currentPrompt.message === 'CHOOSE_STARTING_POKEMONS'
       ? currentPrompt
@@ -329,7 +336,7 @@
   }
 
   $effect(() => {
-    if (game && (followActive || actingPlayerIsSelf) && !replayMode) {
+    if (game && (followActive || actingPlayerIsSelf) && !replayMode && !playingSequence) {
       viewSettingsStore.followPlayer(actingPlayerIndex);
     }
   });
@@ -435,6 +442,7 @@
     gameSessionStore.reset();
     selectionStore.setSelectedHand(null);
     resetTraceTagForm();
+    resetSaveReplayStatus();
     replayStore.clear();
     homeMode = 'play';
     activePlayerControls = [player1Control, player2Control];
@@ -557,11 +565,33 @@
   async function loadGameLog(log: GameLogEntry) {
     gameSessionStore.reset();
     resetTraceTagForm();
+    resetSaveReplayStatus();
     zoneViewerStore.close();
     viewSettingsStore.resetView();
     activePlayerControls = ['self', 'self'];
     homeMode = 'logs';
     await replayStore.loadSaved(log.file || log.id);
+  }
+
+  async function saveReplay() {
+    if (savingReplay) {
+      return;
+    }
+    savingReplay = true;
+    saveReplayMessage = '';
+    saveReplayError = '';
+    try {
+      const response = await localGameApi.saveReplay();
+      if (!response.ok) {
+        throw new Error(response.error ?? 'Unable to save match.');
+      }
+      saveReplayMessage = response.file ? `Saved to Game Logs as ${response.file}.` : 'Saved to Game Logs.';
+      await refreshCatalog();
+    } catch (error) {
+      saveReplayError = error instanceof Error ? error.message : String(error);
+    } finally {
+      savingReplay = false;
+    }
   }
 
   async function playToTarget(target: CardTarget) {
@@ -672,6 +702,10 @@
 
   async function resolvePrompt(value: unknown) {
     if (!currentPrompt) return;
+    if (currentPrompt.fields.playbackOnly === true) {
+      gameStore.confirmPlaybackPrompt();
+      return;
+    }
     await gameSessionStore.resolve(() => commandApi.resolvePrompt(currentPrompt.id, value));
   }
 
@@ -743,6 +777,7 @@
     if (replayMode) {
       replayStore.clear();
       resetTraceTagForm();
+      resetSaveReplayStatus();
       zoneViewerStore.close();
       viewSettingsStore.resetView();
       homeMode = 'logs';
@@ -753,8 +788,16 @@
     }
     gameSessionStore.reset();
     resetTraceTagForm();
+    resetSaveReplayStatus();
     zoneViewerStore.close();
     viewSettingsStore.resetView();
+    activePlayerControls = [player1Control, player2Control];
+  }
+
+  function resetSaveReplayStatus() {
+    saveReplayMessage = '';
+    saveReplayError = '';
+    savingReplay = false;
   }
 
   function resetTraceTagForm() {
@@ -912,6 +955,10 @@
 
   function isSelfControlled(playerIndex: number | undefined) {
     return playerIndex === 0 || playerIndex === 1 ? activePlayerControls[playerIndex] === 'self' : false;
+  }
+
+  function controlLabel(control: PlayerControl) {
+    return control === 'agent' ? 'Agent' : 'Self';
   }
 
   function isAttachEnergyAvailable(index: number) {
@@ -1144,6 +1191,7 @@
         setHomeMode={(nextMode) => {
           homeMode = nextMode;
           if (nextMode === 'logs') {
+            activePlayerControls = ['self', 'self'];
             gameStore.reset();
           } else {
             replayStore.clear();
@@ -1160,6 +1208,7 @@
         turn={game.turn}
         activePlayerName={activePlayer?.name}
         resultLabel={gameResultLabel}
+        modeLabel={replayMode ? '' : modeLabel}
         {gameFinished}
       />
 
@@ -1172,6 +1221,8 @@
         bind:autoConfirmPrompts={viewSettingsStore.autoConfirmPrompts}
         bind:debugZones={viewSettingsStore.debugZones}
         bind:showLogs={viewSettingsStore.showLogs}
+        bind:animateActions={viewSettingsStore.animateActions}
+        bind:actionStepDelayMs={viewSettingsStore.actionStepDelayMs}
         bind:themePreference={viewSettingsStore.themePreference}
         busy={sessionBusy}
         promptActive={replayMode || !!currentPrompt}
@@ -1182,7 +1233,7 @@
         {passTurn}
         {concede}
         {switchSides}
-        switchDisabled={false}
+        switchDisabled={!replayMode && actingPlayerIsSelf}
         {resetGame}
         resetLabel={replayMode ? 'Exit replay' : 'Change decks'}
       />
@@ -1193,12 +1244,15 @@
           step={replayStore.currentStep}
           stepIndex={replayStore.stepIndex}
           copiedForkPoint={replayStore.copiedForkPoint}
+          isPlaying={replayStore.isPlaying}
           setStep={(index) => replayStore.setStep(index)}
           setStateIndex={(index) => replayStore.setStateIndex(index)}
           previousStep={() => replayStore.previousStep()}
           nextStep={() => replayStore.nextStep()}
           firstStep={() => replayStore.firstStep()}
           lastStep={() => replayStore.lastStep()}
+          togglePlayback={() => replayStore.togglePlayback()}
+          backToReplayHome={resetGame}
           copyForkPoint={() => void replayStore.copyForkPoint()}
         />
       {/if}
@@ -1216,6 +1270,11 @@
           traceTagError={traceTagError}
           onsaveTraceTag={saveTraceTag}
           onconfirm={resetGame}
+          onsave={() => void saveReplay()}
+          saveDisabled={savingReplay || !!saveReplayMessage}
+          saveMessage={saveReplayMessage}
+          saveError={saveReplayError}
+          saving={savingReplay}
         />
       {/if}
 
@@ -1234,7 +1293,7 @@
             <PromptHost
               game={game}
               prompt={currentPrompt}
-              resolving={resolvingPrompt}
+              resolving={currentPrompt.fields.playbackOnly === true ? false : resolvingPrompt}
               activeAttachEnergyIndex={attachPromptEnergyIndex}
               attachAssignments={attachPromptAssignments}
               onresolve={resolvePrompt}
@@ -1251,10 +1310,10 @@
           <Hand
             player={topPlayer}
             selectedHand={selectedHand}
-            disabled={!canAct(topPlayer.index) && setupPrompt?.playerIndex !== topPlayer.index}
+            disabled={!isSelfControlled(topPlayer.index) || (!canAct(topPlayer.index) && setupPrompt?.playerIndex !== topPlayer.index)}
             playableIndexes={setupPrompt?.playerIndex === topPlayer.index ? setupPlayableIndexes : []}
             placedIndexes={setupPrompt?.playerIndex === topPlayer.index ? setupPlacedIndexes : []}
-            concealed
+            concealed={topPlayer.index !== actingPlayerIndex || !isSelfControlled(topPlayer.index)}
             onSelect={selectHandCard}
             onDrag={onHandDrag}
             onDragEnd={clearDragState}
@@ -1301,9 +1360,10 @@
           <Hand
             player={bottomPlayer}
             selectedHand={selectedHand}
-            disabled={!canAct(bottomPlayer.index) && setupPrompt?.playerIndex !== bottomPlayer.index}
+            disabled={!isSelfControlled(bottomPlayer.index) || (!canAct(bottomPlayer.index) && setupPrompt?.playerIndex !== bottomPlayer.index)}
             playableIndexes={setupPrompt?.playerIndex === bottomPlayer.index ? setupPlayableIndexes : []}
             placedIndexes={setupPrompt?.playerIndex === bottomPlayer.index ? setupPlacedIndexes : []}
+            concealed={!isSelfControlled(bottomPlayer.index)}
             onSelect={selectHandCard}
             onDrag={onHandDrag}
             onDragEnd={clearDragState}
@@ -1329,7 +1389,7 @@
         {/if}
 
         {#if showLogs}
-          <LogPanel logs={game.logs} />
+          <LogPanel logs={game.logs} timeline={game.actionTimeline} />
         {/if}
 
         <ZoneViewer

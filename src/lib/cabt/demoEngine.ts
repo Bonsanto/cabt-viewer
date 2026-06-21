@@ -7,6 +7,7 @@ import {
   type EngineResponse,
   type GameView,
   type LogView,
+  type ActionTimelineEvent,
   type PlayerView,
   type PokemonSlotView,
   type PromptView,
@@ -416,6 +417,7 @@ export function cabtObservationToGameView(
   observation: CabtObservation | null,
   logs: LogView[],
   dataMaps: CabtDataMaps = DEMO_CABT_DATA,
+  actionTimeline: ActionTimelineEvent[] = [],
 ): GameView {
   const current = observation?.current;
   if (!current) {
@@ -428,6 +430,7 @@ export function cabtObservationToGameView(
       players: [],
       prompts: [],
       logs,
+      actionTimeline,
       events: [],
     };
   }
@@ -444,6 +447,7 @@ export function cabtObservationToGameView(
     players,
     prompts: buildPrompts(observation, activePlayerIndex, dataMaps),
     logs,
+    actionTimeline,
     events: [observation],
   };
 }
@@ -517,7 +521,7 @@ function pokemonToSlot(
   };
 }
 
-function cardToView(cardRef: CabtCard, dataMaps: CabtDataMaps): CardView {
+export function cabtCardToView(cardRef: CabtCard, dataMaps: CabtDataMaps): CardView {
   const data = dataMaps.cardData[cardRef.id];
   if (!data) {
     return {
@@ -552,6 +556,10 @@ function cardToView(cardRef: CabtCard, dataMaps: CabtDataMaps): CardView {
     ...view,
     imageUrl: resolveCardImageUrl(view),
   };
+}
+
+function cardToView(cardRef: CabtCard, dataMaps: CabtDataMaps): CardView {
+  return cabtCardToView(cardRef, dataMaps);
 }
 
 function buildPrompts(observation: CabtObservation, activePlayerIndex: number, dataMaps: CabtDataMaps): PromptView[] {
