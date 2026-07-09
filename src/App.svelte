@@ -20,7 +20,7 @@
   import Toolbar from './lib/components/Toolbar.svelte';
   import ZoneViewer from './lib/components/ZoneViewer.svelte';
   import type { GameCommandApi } from './lib/game/gameApi';
-  import { localGameApi } from './lib/game/httpClient';
+  import { localGameApi, type PlayerControl } from './lib/game/httpClient';
   import { formatCabtDeckList } from './lib/game/deckImport';
   import { labelFor } from './lib/game/labels';
   import cardRows from './lib/cabt/cardData.generated.json';
@@ -88,10 +88,29 @@
   let homeMode = $state<HomeMode>(initialReplayMode ? 'logs' : 'play');
   let agents = $state<AgentOption[]>([]);
   let gameLogs = $state<GameLogEntry[]>([]);
-  let selectedAgentId = $state('');
-  let lastLoadedAgentDeckUrl = $state('');
+  let player1Control = $state<PlayerControl>('self');
+  let player2Control = $state<PlayerControl>('agent');
+  let player1AgentId = $state('');
+  let player2AgentId = $state('');
+  let player1DeckSource = $state('import');
+  let player2DeckSource = $state('import');
+  let activePlayerControls = $state<[PlayerControl, PlayerControl]>(['self', 'agent']);
+  let lastLoadedPlayer1DeckSource = $state('');
+  let lastLoadedPlayer2DeckSource = $state('');
+  let player1DeckLoading = $state(false);
+  let player2DeckLoading = $state(false);
   let catalogBusy = $state(false);
   let catalogError = $state('');
+  let traceTrust = $state('gold');
+  let traceConfidence = $state(5);
+  let traceNote = $state('');
+  let traceTags = $state('');
+  let traceTagBusy = $state(false);
+  let traceTagMessage = $state('');
+  let traceTagError = $state('');
+  let savingReplay = $state(false);
+  let saveReplayMessage = $state('');
+  let saveReplayError = $state('');
   let replayMode = $derived(homeMode === 'logs' && !!replayStore.replay);
   let game = $derived(replayMode ? replayStore.currentView : gameStore.game);
   let error = $derived(homeMode === 'logs' ? replayStore.error : gameStore.error);
@@ -99,6 +118,7 @@
   let sessionBusy = $derived(replayMode ? replayStore.loading : busy);
   let commandApi = $derived<GameCommandApi>(localGameApi);
   let resolvingPrompt = $derived(gameStore.resolvingPrompt);
+  let playingSequence = $derived(gameStore.playingSequence);
   let selectedHand = $derived(selectionStore.selectedHand);
   let draggingHand = $derived(selectionStore.draggingHand);
   let focusedSlot = $derived(selectionStore.focusedSlot);
@@ -117,10 +137,14 @@
   let showLogs = $derived(viewSettingsStore.showLogs);
   let theme = $derived(viewSettingsStore.theme);
   let themePreference = $derived(viewSettingsStore.themePreference);
-  let selectedAgent = $derived(agents.find((agent) => agent.id === selectedAgentId));
+  let selectedPlayer1Agent = $derived(agents.find((agent) => agent.id === player1AgentId));
+  let selectedPlayer2Agent = $derived(agents.find((agent) => agent.id === player2AgentId));
+  let selectedPlayer1Deck = $derived(agents.find((agent) => agent.id === player1DeckSource && agent.deckUrl));
+  let selectedPlayer2Deck = $derived(agents.find((agent) => agent.id === player2DeckSource && agent.deckUrl));
   onMount(() => {
     const stopThemeSync = viewSettingsStore.startThemeSync();
     void refreshCatalog();
+    void loadLocalPlayerDeck();
     if (initialReplayMode) {
       void replayStore.loadSaved();
     }
@@ -138,15 +162,36 @@
     };
   });
   $effect(() => {
-    const deckUrl = selectedAgent?.deckUrl ?? '';
-    if (!deckUrl) {
-      lastLoadedAgentDeckUrl = '';
+    if (player1Control === 'agent' && selectedPlayer1Agent?.deckUrl && player1DeckSource !== selectedPlayer1Agent.id) {
+      player1DeckSource = selectedPlayer1Agent.id;
+    }
+  });
+  $effect(() => {
+    if (player2Control === 'agent' && selectedPlayer2Agent?.deckUrl && player2DeckSource !== selectedPlayer2Agent.id) {
+      player2DeckSource = selectedPlayer2Agent.id;
+    }
+  });
+  $effect(() => {
+    const deckUrl = selectedPlayer1Deck?.deckUrl ?? '';
+    if (player1DeckSource === 'import' || !deckUrl) {
+      lastLoadedPlayer1DeckSource = '';
       return;
     }
-    if (deckUrl === lastLoadedAgentDeckUrl) {
+    if (player1DeckSource === lastLoadedPlayer1DeckSource) {
       return;
     }
-    void loadSelectedAgentDeck(deckUrl);
+    void loadSelectedDeck(deckUrl, player1DeckSource, 0);
+  });
+  $effect(() => {
+    const deckUrl = selectedPlayer2Deck?.deckUrl ?? '';
+    if (player2DeckSource === 'import' || !deckUrl) {
+      lastLoadedPlayer2DeckSource = '';
+      return;
+    }
+    if (player2DeckSource === lastLoadedPlayer2DeckSource) {
+      return;
+    }
+    void loadSelectedDeck(deckUrl, player2DeckSource, 1);
   });
   let zoneViewerOpen = $derived(zoneViewerStore.open);
   let zoneViewerTitle = $derived(zoneViewerStore.title);
@@ -156,6 +201,9 @@
   let bottomPlayer = $derived(game?.players[viewIndex] ?? game?.players[0]);
   let topPlayer = $derived(game?.players.find((player) => player.index !== bottomPlayer?.index));
   let currentPrompt = $derived(replayMode ? null : game?.prompts[0]);
+  let actingPlayerIndex = $derived(currentPrompt?.playerIndex ?? game?.activePlayerIndex ?? 0);
+  let actingPlayerIsSelf = $derived(activePlayerControls[actingPlayerIndex] === 'self');
+  let modeLabel = $derived(`${controlLabel(activePlayerControls[0])} vs ${controlLabel(activePlayerControls[1])}`);
   let boardTargetPrompt = $derived(currentPrompt?.className === 'ChoosePokemonPrompt' ? currentPrompt : null);
   let attachPrompt = $derived(currentPrompt?.className === 'AttachEnergyPrompt' ? currentPrompt : null);
   let damagePrompt = $derived(currentPrompt?.className === 'PutDamagePrompt' ? currentPrompt : null);
@@ -206,6 +254,7 @@
   let boardStrategy = $derived<BoardInteractionStrategy | null>(
     game && currentPrompt ? createBoardStrategy(game, currentPrompt) : null,
   );
+  let showPromptHpBadges = $derived(boardStrategy?.iconName === 'damage');
   $effect(() => {
     if (!boardStrategy || !game) {
       return;
@@ -216,7 +265,9 @@
     };
   });
   let autoResolvePromptResult = $derived(autoResolvablePromptResult(currentPrompt, game));
-  let autoResolvePrompt = $derived(shouldAutoResolvePrompt(currentPrompt, autoConfirmPrompts, autoResolvePromptResult));
+  let autoResolvePrompt = $derived(
+    shouldAutoResolvePrompt(currentPrompt, autoConfirmPrompts, autoResolvePromptResult, !actingPlayerIsSelf),
+  );
   let setupPrompt = $derived(
     currentPrompt?.className === 'ChooseCardsPrompt' && currentPrompt.message === 'CHOOSE_STARTING_POKEMONS'
       ? currentPrompt
@@ -285,8 +336,8 @@
   }
 
   $effect(() => {
-    if (game && followActive && !replayMode) {
-      viewSettingsStore.followPlayer(currentPrompt?.playerIndex ?? game.activePlayerIndex);
+    if (game && (followActive || actingPlayerIsSelf) && !replayMode && !playingSequence) {
+      viewSettingsStore.followPlayer(actingPlayerIndex);
     }
   });
   let gameFinished = $derived(game?.phase === 7);
@@ -378,16 +429,31 @@
   });
 
   async function startGame() {
+    if (!(await ensureSelectedDecksLoaded())) {
+      return;
+    }
     const decks = deckImportStore.parseLocalGameDecks();
     if (!decks.ok) {
+      gameSessionStore.reset();
       gameStore.setError(decks.error);
       return;
     }
 
+    gameSessionStore.reset();
     selectionStore.setSelectedHand(null);
+    resetTraceTagForm();
+    resetSaveReplayStatus();
     replayStore.clear();
     homeMode = 'play';
-    await gameSessionStore.run(() => localGameApi.start(decks.player1Cards, decks.player2Cards, selectedAgentId));
+    activePlayerControls = [player1Control, player2Control];
+    await gameSessionStore.run(() =>
+      localGameApi.start(decks.player1Cards, decks.player2Cards, {
+        player1Control,
+        player2Control,
+        player1AgentId,
+        player2AgentId,
+      }),
+    );
   }
 
   async function refreshCatalog() {
@@ -397,8 +463,17 @@
       const [nextAgents, nextLogs] = await Promise.all([loadAgentOptions(), loadGameLogs()]);
       agents = nextAgents;
       gameLogs = nextLogs;
-      if (!selectedAgentId || !nextAgents.some((agent) => agent.id === selectedAgentId)) {
-        selectedAgentId = nextAgents[0]?.id ?? '';
+      if (!player1AgentId || !nextAgents.some((agent) => agent.id === player1AgentId)) {
+        player1AgentId = nextAgents[0]?.id ?? '';
+      }
+      if (!player2AgentId || !nextAgents.some((agent) => agent.id === player2AgentId)) {
+        player2AgentId = nextAgents[0]?.id ?? '';
+      }
+      if (player1DeckSource !== 'import' && !nextAgents.some((agent) => agent.id === player1DeckSource && agent.deckUrl)) {
+        player1DeckSource = 'import';
+      }
+      if (player2DeckSource !== 'import' && !nextAgents.some((agent) => agent.id === player2DeckSource && agent.deckUrl)) {
+        player2DeckSource = 'import';
       }
     } catch (error) {
       catalogError = error instanceof Error ? error.message : String(error);
@@ -407,14 +482,81 @@
     }
   }
 
-  async function loadSelectedAgentDeck(deckUrl: string) {
+  async function ensureSelectedDecksLoaded() {
+    const player1Source = forcedDeckSource(player1Control, selectedPlayer1Agent, player1DeckSource);
+    const player2Source = forcedDeckSource(player2Control, selectedPlayer2Agent, player2DeckSource);
+    player1DeckSource = player1Source;
+    player2DeckSource = player2Source;
+    const player1Loaded = await ensureDeckLoaded(player1Source, 0);
+    const player2Loaded = await ensureDeckLoaded(player2Source, 1);
+    return player1Loaded && player2Loaded;
+  }
+
+  async function ensureDeckLoaded(deckSource: string, playerIndex: number) {
+    if (deckSource === 'import') {
+      return true;
+    }
+    const lastLoaded = playerIndex === 0 ? lastLoadedPlayer1DeckSource : lastLoadedPlayer2DeckSource;
+    if (lastLoaded === deckSource) {
+      return true;
+    }
+    const deckUrl = agents.find((agent) => agent.id === deckSource)?.deckUrl;
+    if (!deckUrl) {
+      return true;
+    }
+    return loadSelectedDeck(deckUrl, deckSource, playerIndex);
+  }
+
+  function forcedDeckSource(control: PlayerControl, agent: AgentOption | undefined, deckSource: string) {
+    return control === 'agent' && agent?.deckUrl ? agent.id : deckSource;
+  }
+
+  async function loadSelectedDeck(deckUrl: string, deckSource: string, playerIndex: number) {
+    if (playerIndex === 0) {
+      player1DeckLoading = true;
+    } else {
+      player2DeckLoading = true;
+    }
     try {
       const response = await fetch(deckUrl);
       if (!response.ok) {
         throw new Error(`${deckUrl}: ${response.status}`);
       }
-      deckImportStore.deck2Text = formatCabtDeckList(await response.text(), cardRows);
-      lastLoadedAgentDeckUrl = deckUrl;
+      const deckText = formatCabtDeckList(await response.text(), cardRows);
+      if (playerIndex === 0) {
+        deckImportStore.deck1Text = deckText;
+        lastLoadedPlayer1DeckSource = deckSource;
+      } else {
+        deckImportStore.deck2Text = deckText;
+        lastLoadedPlayer2DeckSource = deckSource;
+      }
+      return true;
+    } catch (error) {
+      catalogError = error instanceof Error ? error.message : String(error);
+      return false;
+    } finally {
+      if (playerIndex === 0) {
+        player1DeckLoading = false;
+      } else {
+        player2DeckLoading = false;
+      }
+    }
+  }
+
+  async function loadLocalPlayerDeck() {
+    try {
+      const response = await fetch('/local-engine/local-player-deck');
+      if (response.status === 404) {
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`/local-engine/local-player-deck: ${response.status}`);
+      }
+      const body = (await response.json()) as { ok?: boolean; deckText?: unknown; error?: unknown };
+      if (!body.ok || typeof body.deckText !== 'string') {
+        throw new Error(String(body.error || 'Local player deck override is invalid.'));
+      }
+      deckImportStore.deck1Text = body.deckText;
     } catch (error) {
       catalogError = error instanceof Error ? error.message : String(error);
     }
@@ -422,14 +564,38 @@
 
   async function loadGameLog(log: GameLogEntry) {
     gameSessionStore.reset();
+    resetTraceTagForm();
+    resetSaveReplayStatus();
     zoneViewerStore.close();
     viewSettingsStore.resetView();
+    activePlayerControls = ['self', 'self'];
     homeMode = 'logs';
     await replayStore.loadSaved(log.file || log.id);
   }
 
+  async function saveReplay() {
+    if (savingReplay) {
+      return;
+    }
+    savingReplay = true;
+    saveReplayMessage = '';
+    saveReplayError = '';
+    try {
+      const response = await localGameApi.saveReplay();
+      if (!response.ok) {
+        throw new Error(response.error ?? 'Unable to save match.');
+      }
+      saveReplayMessage = response.file ? `Saved to Game Logs as ${response.file}.` : 'Saved to Game Logs.';
+      await refreshCatalog();
+    } catch (error) {
+      saveReplayError = error instanceof Error ? error.message : String(error);
+    } finally {
+      savingReplay = false;
+    }
+  }
+
   async function playToTarget(target: CardTarget) {
-    if (!selectedHand || !game || !canAct(selectedHand.playerIndex)) {
+    if (currentPrompt || !selectedHand || !game || !canAct(selectedHand.playerIndex)) {
       return;
     }
     await gameSessionStore.run(() => commandApi.playCard(selectedHand!.playerIndex, selectedHand!.handIndex, target));
@@ -536,10 +702,17 @@
 
   async function resolvePrompt(value: unknown) {
     if (!currentPrompt) return;
+    if (currentPrompt.fields.playbackOnly === true) {
+      gameStore.confirmPlaybackPrompt();
+      return;
+    }
     await gameSessionStore.resolve(() => commandApi.resolvePrompt(currentPrompt.id, value));
   }
 
   function selectHandCard(playerIndex: number, handIndex: number) {
+    if (!isSelfControlled(playerIndex)) {
+      return;
+    }
     if (setupPrompt && playerIndex === setupPrompt.playerIndex) {
       if (!isSetupStartable(game?.players[playerIndex]?.hand[handIndex], handIndex)) {
         return;
@@ -557,6 +730,9 @@
   }
 
   function onHandDrag(playerIndex: number, handIndex: number, event: DragEvent) {
+    if (!isSelfControlled(playerIndex)) {
+      return;
+    }
     if (setupPrompt && playerIndex === setupPrompt.playerIndex) {
       if (!isSetupStartable(game?.players[playerIndex]?.hand[handIndex], handIndex)) {
         return;
@@ -600,6 +776,8 @@
   function resetGame() {
     if (replayMode) {
       replayStore.clear();
+      resetTraceTagForm();
+      resetSaveReplayStatus();
       zoneViewerStore.close();
       viewSettingsStore.resetView();
       homeMode = 'logs';
@@ -609,8 +787,56 @@
       return;
     }
     gameSessionStore.reset();
+    resetTraceTagForm();
+    resetSaveReplayStatus();
     zoneViewerStore.close();
     viewSettingsStore.resetView();
+    activePlayerControls = [player1Control, player2Control];
+  }
+
+  function resetSaveReplayStatus() {
+    saveReplayMessage = '';
+    saveReplayError = '';
+    savingReplay = false;
+  }
+
+  function resetTraceTagForm() {
+    traceTrust = 'gold';
+    traceConfidence = 5;
+    traceNote = '';
+    traceTags = '';
+    resetTraceTagStatus();
+  }
+
+  function resetTraceTagStatus() {
+    traceTagMessage = '';
+    traceTagError = '';
+    traceTagBusy = false;
+  }
+
+  async function saveTraceTag() {
+    if (traceTagBusy) {
+      return;
+    }
+    traceTagBusy = true;
+    traceTagMessage = '';
+    traceTagError = '';
+    try {
+      const response = await localGameApi.tagLatestTrace({
+        trust: traceTrust,
+        confidence: traceConfidence,
+        note: traceNote,
+        tags: traceTags,
+      });
+      if (!response.ok) {
+        throw new Error(response.error ?? 'Unable to tag trace.');
+      }
+      traceTagMessage = `Saved ${response.trust ?? traceTrust} trace tag.`;
+    } catch (error) {
+      traceTagError = error instanceof Error ? error.message : String(error);
+    } finally {
+      traceTagBusy = false;
+    }
   }
 
   function dropToSlot(slot: PokemonSlotView, event: DragEvent) {
@@ -693,7 +919,7 @@
   }
 
   function playSelectedToBoard() {
-    if (!game || !activePlayer || !canPlayToArea(activePlayer)) {
+    if (currentPrompt || !game || !activePlayer || !canPlayToArea(activePlayer)) {
       return;
     }
     void playToTarget(targetFor(game.activePlayerIndex, game.activePlayerIndex, SlotType.ACTIVE));
@@ -716,12 +942,23 @@
     if (replayMode) {
       return false;
     }
+    if (!isSelfControlled(playerIndex)) {
+      return false;
+    }
     return canPlayerAct({
       playerIndex,
       activePlayerIndex: game?.activePlayerIndex,
       hasPrompt: !!currentPrompt,
       finished: gameFinished,
     });
+  }
+
+  function isSelfControlled(playerIndex: number | undefined) {
+    return playerIndex === 0 || playerIndex === 1 ? activePlayerControls[playerIndex] === 'self' : false;
+  }
+
+  function controlLabel(control: PlayerControl) {
+    return control === 'agent' ? 'Agent' : 'Self';
   }
 
   function isAttachEnergyAvailable(index: number) {
@@ -935,17 +1172,26 @@
         {homeMode}
         bind:deck1Text={deckImportStore.deck1Text}
         bind:deck2Text={deckImportStore.deck2Text}
-        bind:selectedAgentId
+        bind:player1Control
+        bind:player2Control
+        bind:player1AgentId
+        bind:player2AgentId
+        bind:player1DeckSource
+        bind:player2DeckSource
         {agents}
         {gameLogs}
-        opponentDeckLocked={!!selectedAgent?.deckUrl}
-        busy={sessionBusy}
+        player1DeckLocked={player1DeckSource !== 'import'}
+        player2DeckLocked={player2DeckSource !== 'import'}
+        player1AgentHasPairedDeck={player1Control === 'agent' && !!selectedPlayer1Agent?.deckUrl}
+        player2AgentHasPairedDeck={player2Control === 'agent' && !!selectedPlayer2Agent?.deckUrl}
+        busy={sessionBusy || player1DeckLoading || player2DeckLoading}
         {catalogBusy}
         {error}
         {catalogError}
         setHomeMode={(nextMode) => {
           homeMode = nextMode;
           if (nextMode === 'logs') {
+            activePlayerControls = ['self', 'self'];
             gameStore.reset();
           } else {
             replayStore.clear();
@@ -962,6 +1208,7 @@
         turn={game.turn}
         activePlayerName={activePlayer?.name}
         resultLabel={gameResultLabel}
+        modeLabel={replayMode ? '' : modeLabel}
         {gameFinished}
       />
 
@@ -974,16 +1221,19 @@
         bind:autoConfirmPrompts={viewSettingsStore.autoConfirmPrompts}
         bind:debugZones={viewSettingsStore.debugZones}
         bind:showLogs={viewSettingsStore.showLogs}
+        bind:animateActions={viewSettingsStore.animateActions}
+        bind:actionStepDelayMs={viewSettingsStore.actionStepDelayMs}
         bind:themePreference={viewSettingsStore.themePreference}
         busy={sessionBusy}
         promptActive={replayMode || !!currentPrompt}
         {gameFinished}
+        canConcede={game.capabilities?.concede !== false}
         {error}
         {resetPerspective}
         {passTurn}
         {concede}
         {switchSides}
-        switchDisabled={false}
+        switchDisabled={!replayMode && actingPlayerIsSelf}
         {resetGame}
         resetLabel={replayMode ? 'Exit replay' : 'Change decks'}
       />
@@ -994,18 +1244,38 @@
           step={replayStore.currentStep}
           stepIndex={replayStore.stepIndex}
           copiedForkPoint={replayStore.copiedForkPoint}
+          isPlaying={replayStore.isPlaying}
           setStep={(index) => replayStore.setStep(index)}
           setStateIndex={(index) => replayStore.setStateIndex(index)}
           previousStep={() => replayStore.previousStep()}
           nextStep={() => replayStore.nextStep()}
           firstStep={() => replayStore.firstStep()}
           lastStep={() => replayStore.lastStep()}
+          togglePlayback={() => replayStore.togglePlayback()}
+          backToReplayHome={resetGame}
           copyForkPoint={() => void replayStore.copyForkPoint()}
         />
       {/if}
 
       {#if gameFinished && !replayMode}
-        <EndGamePrompt resultLabel={gameResultLabel} turn={game.turn} onconfirm={resetGame} />
+        <EndGamePrompt
+          resultLabel={gameResultLabel}
+          turn={game.turn}
+          bind:traceTrust
+          bind:traceConfidence
+          bind:traceNote
+          bind:traceTags
+          traceTagBusy={traceTagBusy}
+          traceTagMessage={traceTagMessage}
+          traceTagError={traceTagError}
+          onsaveTraceTag={saveTraceTag}
+          onconfirm={resetGame}
+          onsave={() => void saveReplay()}
+          saveDisabled={savingReplay || !!saveReplayMessage}
+          saveMessage={saveReplayMessage}
+          saveError={saveReplayError}
+          saving={savingReplay}
+        />
       {/if}
 
       {#if setupPrompt}
@@ -1023,7 +1293,7 @@
             <PromptHost
               game={game}
               prompt={currentPrompt}
-              resolving={resolvingPrompt}
+              resolving={currentPrompt.fields.playbackOnly === true ? false : resolvingPrompt}
               activeAttachEnergyIndex={attachPromptEnergyIndex}
               attachAssignments={attachPromptAssignments}
               onresolve={resolvePrompt}
@@ -1040,10 +1310,10 @@
           <Hand
             player={topPlayer}
             selectedHand={selectedHand}
-            disabled={!canAct(topPlayer.index) && setupPrompt?.playerIndex !== topPlayer.index}
+            disabled={!isSelfControlled(topPlayer.index) || (!canAct(topPlayer.index) && setupPrompt?.playerIndex !== topPlayer.index)}
             playableIndexes={setupPrompt?.playerIndex === topPlayer.index ? setupPlayableIndexes : []}
             placedIndexes={setupPrompt?.playerIndex === topPlayer.index ? setupPlacedIndexes : []}
-            concealed
+            concealed={topPlayer.index !== actingPlayerIndex || !isSelfControlled(topPlayer.index)}
             onSelect={selectHandCard}
             onDrag={onHandDrag}
             onDragEnd={clearDragState}
@@ -1068,6 +1338,7 @@
           {isPlayableTarget}
           {isBoardPromptSelectable}
           {isBoardPromptSelected}
+          {showPromptHpBadges}
           {boardSlotDelta}
           {clickSlot}
           {allowDrop}
@@ -1089,9 +1360,10 @@
           <Hand
             player={bottomPlayer}
             selectedHand={selectedHand}
-            disabled={!canAct(bottomPlayer.index) && setupPrompt?.playerIndex !== bottomPlayer.index}
+            disabled={!isSelfControlled(bottomPlayer.index) || (!canAct(bottomPlayer.index) && setupPrompt?.playerIndex !== bottomPlayer.index)}
             playableIndexes={setupPrompt?.playerIndex === bottomPlayer.index ? setupPlayableIndexes : []}
             placedIndexes={setupPrompt?.playerIndex === bottomPlayer.index ? setupPlacedIndexes : []}
+            concealed={!isSelfControlled(bottomPlayer.index)}
             onSelect={selectHandCard}
             onDrag={onHandDrag}
             onDragEnd={clearDragState}
@@ -1117,7 +1389,7 @@
         {/if}
 
         {#if showLogs}
-          <LogPanel logs={game.logs} />
+          <LogPanel logs={game.logs} timeline={game.actionTimeline} />
         {/if}
 
         <ZoneViewer

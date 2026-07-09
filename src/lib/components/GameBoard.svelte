@@ -24,6 +24,7 @@
     isPlayableTarget: (slot: PokemonSlotView) => boolean;
     isBoardPromptSelectable: (slot: PokemonSlotView) => boolean;
     isBoardPromptSelected: (slot: PokemonSlotView) => boolean;
+    showPromptHpBadges?: boolean;
     boardSlotDelta: (slot: PokemonSlotView) => number;
     clickSlot: (slot: PokemonSlotView) => void;
     allowDrop: (event: DragEvent, slot: PokemonSlotView) => void;
@@ -59,6 +60,7 @@
     isPlayableTarget,
     isBoardPromptSelectable,
     isBoardPromptSelected,
+    showPromptHpBadges = false,
     boardSlotDelta,
     clickSlot,
     allowDrop,
@@ -187,6 +189,7 @@
       {isPlayableTarget}
       {isBoardPromptSelectable}
       {isBoardPromptSelected}
+      {showPromptHpBadges}
       {boardSlotDelta}
       {clickSlot}
       {allowDrop}
@@ -216,6 +219,7 @@
       {isPlayableTarget}
       {isBoardPromptSelectable}
       {isBoardPromptSelected}
+      {showPromptHpBadges}
       {boardSlotDelta}
       {clickSlot}
       {allowDrop}
@@ -239,6 +243,7 @@
       {isPlayableTarget}
       {isBoardPromptSelectable}
       {isBoardPromptSelected}
+      {showPromptHpBadges}
       {boardSlotDelta}
       {clickSlot}
       {allowDrop}

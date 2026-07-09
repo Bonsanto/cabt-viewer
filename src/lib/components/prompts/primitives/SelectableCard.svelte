@@ -10,6 +10,8 @@
     draggable?: boolean;
     children: Snippet;
     label?: Snippet;
+    labelText?: string;
+    labelDetail?: string;
     onclick?: (event: MouseEvent) => void;
     ondragstart?: (event: DragEvent) => void;
   };
@@ -23,6 +25,8 @@
     draggable = false,
     children,
     label,
+    labelText,
+    labelDetail,
     onclick,
     ondragstart,
   }: Props = $props();
@@ -43,6 +47,15 @@
   {@render children()}
   {#if label}
     <span class="selectable-card-label">{@render label()}</span>
+  {:else if labelText || labelDetail}
+    <span class="selectable-card-label">
+      {#if labelText}
+        <span>{labelText}</span>
+      {/if}
+      {#if labelDetail}
+        <small>{labelDetail}</small>
+      {/if}
+    </span>
   {/if}
 </button>
 
@@ -119,6 +132,8 @@
   }
 
   .selectable-card-label {
+    display: grid;
+    gap: 2px;
     min-width: 0;
     max-width: 100%;
     padding: 3px 8px;
@@ -128,9 +143,14 @@
     font-size: 11px;
     font-weight: 700;
     line-height: 1.2;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .selectable-card-label small {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
   }
 
   .selectable-card.assigned .selectable-card-label {

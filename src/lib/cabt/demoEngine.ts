@@ -7,12 +7,14 @@ import {
   type EngineResponse,
   type GameView,
   type LogView,
+  type ActionTimelineEvent,
   type PlayerView,
   type PokemonSlotView,
   type PromptView,
 } from '../game/types';
 import {
   CabtAreaType,
+  CabtLogType,
   CabtOptionType,
   CabtSelectContext,
   CabtSelectType,
@@ -415,6 +417,7 @@ export function cabtObservationToGameView(
   observation: CabtObservation | null,
   logs: LogView[],
   dataMaps: CabtDataMaps = DEMO_CABT_DATA,
+  actionTimeline: ActionTimelineEvent[] = [],
 ): GameView {
   const current = observation?.current;
   if (!current) {
@@ -427,6 +430,7 @@ export function cabtObservationToGameView(
       players: [],
       prompts: [],
       logs,
+      actionTimeline,
       events: [],
     };
   }
@@ -443,6 +447,7 @@ export function cabtObservationToGameView(
     players,
     prompts: buildPrompts(observation, activePlayerIndex, dataMaps),
     logs,
+    actionTimeline,
     events: [observation],
   };
 }
@@ -516,7 +521,7 @@ function pokemonToSlot(
   };
 }
 
-function cardToView(cardRef: CabtCard, dataMaps: CabtDataMaps): CardView {
+export function cabtCardToView(cardRef: CabtCard, dataMaps: CabtDataMaps): CardView {
   const data = dataMaps.cardData[cardRef.id];
   if (!data) {
     return {
@@ -553,12 +558,43 @@ function cardToView(cardRef: CabtCard, dataMaps: CabtDataMaps): CardView {
   };
 }
 
+function cardToView(cardRef: CabtCard, dataMaps: CabtDataMaps): CardView {
+  return cabtCardToView(cardRef, dataMaps);
+}
+
 function buildPrompts(observation: CabtObservation, activePlayerIndex: number, dataMaps: CabtDataMaps): PromptView[] {
   const select = observation.select;
   if (!select || select.type === CabtSelectType.MAIN) {
     return [];
   }
-  const id = promptIdForSelect(select);
+  const id = promptIdForSelect(select, observation);
+  if (isDamageCounterPrompt(select, observation, activePlayerIndex)) {
+    const targets = optionTargetsForSelect(select, observation, activePlayerIndex);
+    const damageConfig = damageCounterPromptConfig(select, observation);
+    return [
+      {
+        id,
+        className: 'PutDamagePrompt',
+        type: 'cabt-damage-counter-select',
+        playerId: activePlayerIndex,
+        playerIndex: activePlayerIndex,
+        supported: true,
+        message: cabtSelectLabel(select.context),
+        resultSchema: 'optionIndexes',
+        fields: {
+          targets: targets.map((item) => item.target),
+          optionIndexesByTarget: targets,
+          damage: damageConfig.damage,
+          options: {
+            min: damageConfig.min,
+            max: damageConfig.max,
+            damageMultiple: damageConfig.damageMultiple,
+          },
+          cabtSelect: select,
+        },
+      },
+    ];
+  }
   if (isPrizeSelectionPrompt(select)) {
     return [
       {
@@ -604,6 +640,7 @@ function buildPrompts(observation: CabtObservation, activePlayerIndex: number, d
             };
             return {
               ...view,
+              ...promptCardMetadata(option, observation, dataMaps),
               index: optionIndex,
             };
           }),
@@ -668,17 +705,24 @@ function isCardSelectionPrompt(observation: CabtObservation) {
   return select.option.some((option, optionIndex) => option.type === CabtOptionType.CARD || !!cardForOption(option, observation, optionIndex));
 }
 
-function promptIdForSelect(select: NonNullable<CabtObservation['select']>) {
+function promptIdForSelect(select: NonNullable<CabtObservation['select']>, observation?: CabtObservation) {
   return hashPromptKey(JSON.stringify({
     context: select.context,
     type: select.type,
     min: select.minCount,
     max: select.maxCount,
+    remainDamageCounter: select.remainDamageCounter,
+    remainEnergyCost: select.remainEnergyCost,
+    damageFromLog: damageCounterDamageFromLogs(select, observation),
     options: select.option.map((option) => [
       option.type,
       option.area,
       option.index,
       option.playerIndex,
+      option.energyIndex,
+      option.toolIndex,
+      option.inPlayArea,
+      option.inPlayIndex,
       option.attackId,
       option.cardId,
       option.serial,
@@ -693,6 +737,99 @@ function hashPromptKey(value: string) {
     hash = ((hash << 5) + hash) ^ value.charCodeAt(index);
   }
   return Math.abs(hash);
+}
+
+function isDamageCounterPrompt(select: CabtSelectData, observation: CabtObservation, activePlayerIndex: number) {
+  return (select.context === CabtSelectContext.DAMAGE_COUNTER || select.context === CabtSelectContext.DAMAGE_COUNTER_ANY)
+    && optionTargetsForSelect(select, observation, activePlayerIndex).length > 0;
+}
+
+function damageCounterPromptConfig(select: CabtSelectData, observation: CabtObservation) {
+  const remainingCounters = remainingDamageCounterCount(select);
+  if (remainingCounters) {
+    return {
+      damage: remainingCounters * 10,
+      min: remainingCounters,
+      max: remainingCounters,
+      damageMultiple: 10,
+    };
+  }
+
+  const damageFromLog = damageCounterDamageFromLogs(select, observation);
+  if (damageFromLog) {
+    return {
+      damage: damageFromLog,
+      min: 1,
+      max: 1,
+      damageMultiple: damageFromLog,
+    };
+  }
+
+  const counters = Math.max(1, select.maxCount, select.minCount);
+  return {
+    damage: counters * 10,
+    min: counters,
+    max: counters,
+    damageMultiple: 10,
+  };
+}
+
+function remainingDamageCounterCount(select: CabtSelectData) {
+  const remain = Number(select.remainDamageCounter);
+  if (Number.isFinite(remain) && remain > 0) {
+    return Math.floor(remain);
+  }
+  return 0;
+}
+
+function damageCounterDamageFromLogs(select: CabtSelectData, observation?: CabtObservation) {
+  if (select.context !== CabtSelectContext.DAMAGE_COUNTER || !observation?.logs?.length) {
+    return 0;
+  }
+  for (let index = observation.logs.length - 1; index >= 0; index -= 1) {
+    const log = observation.logs[index];
+    if (Number(log.type) !== CabtLogType.HP_CHANGE || log.putDamageCounter === true) {
+      continue;
+    }
+    const damage = Math.abs(Number(log.value));
+    if (!Number.isFinite(damage) || damage <= 0) {
+      continue;
+    }
+    const counters = Math.floor(damage / 10);
+    if (counters > 0) {
+      return counters * 10;
+    }
+  }
+  return 0;
+}
+
+function optionTargetsForSelect(select: CabtSelectData, observation: CabtObservation, activePlayerIndex: number) {
+  return select.option
+    .map((option, optionIndex) => {
+      const target = optionTargetForSelectOption(option, select, observation.current?.yourIndex ?? activePlayerIndex);
+      return target ? { target, optionIndex } : null;
+    })
+    .filter((item): item is { target: CardTarget; optionIndex: number } => !!item);
+}
+
+function optionTargetForSelectOption(option: CabtOption, _select: CabtSelectData, defaultPlayerIndex: number | null): CardTarget | null {
+  if (
+    option.index === undefined
+    || option.index === null
+    || (option.area !== CabtAreaType.ACTIVE && option.area !== CabtAreaType.BENCH)
+  ) {
+    return null;
+  }
+  const playerIndex = option.playerIndex ?? defaultPlayerIndex;
+  if (playerIndex === undefined || playerIndex === null) {
+    return null;
+  }
+  return targetFor(
+    defaultPlayerIndex ?? playerIndex,
+    playerIndex,
+    option.area === CabtAreaType.ACTIVE ? SlotType.ACTIVE : SlotType.BENCH,
+    option.index,
+  );
 }
 
 function buildAvailableActions(
@@ -808,6 +945,66 @@ function cardForOption(option: CabtOption, observation: CabtObservation, optionI
   if (area === CabtAreaType.BENCH) return attachedCardForOption(player.bench[index], option) ?? player.bench[index] ?? null;
   if (area === CabtAreaType.PRIZE) return player.prize[index] ?? null;
   return null;
+}
+
+function promptCardMetadata(option: CabtOption, observation: CabtObservation, dataMaps: CabtDataMaps) {
+  const source = attachedSourceForOption(option, observation);
+  if (!source) {
+    return {};
+  }
+  const pokemonName = dataMaps.cardData[source.pokemon.id]?.name ?? `Card ${source.pokemon.id}`;
+  const slotName = source.slot === 'active' ? 'Active' : `Bench ${source.index + 1}`;
+  const currentHp = Math.max(0, source.pokemon.hp);
+  const maxHp = Math.max(0, source.pokemon.maxHp);
+  const damage = Math.max(0, maxHp - currentHp);
+  const attachmentParts: string[] = [];
+  if (option.energyIndex !== undefined && option.energyIndex !== null) {
+    attachmentParts.push(`energy ${option.energyIndex + 1}/${Math.max(1, source.pokemon.energyCards.length)}`);
+  }
+  if (option.toolIndex !== undefined && option.toolIndex !== null) {
+    attachmentParts.push(`tool ${option.toolIndex + 1}/${Math.max(1, source.pokemon.tools.length)}`);
+  }
+  return {
+    promptLabel: `P${source.playerIndex} ${slotName}: ${pokemonName}`,
+    promptSubLabel: [
+      maxHp ? `HP ${currentHp}/${maxHp}` : null,
+      damage ? `${damage} damage` : null,
+      ...attachmentParts,
+    ].filter(Boolean).join(' · '),
+  };
+}
+
+function attachedSourceForOption(option: CabtOption, observation: CabtObservation) {
+  const area = option.area;
+  const index = option.index;
+  const current = observation.current;
+  if (
+    !current
+    || (area !== CabtAreaType.ACTIVE && area !== CabtAreaType.BENCH)
+    || index === undefined
+    || index === null
+    || (
+      (option.energyIndex === undefined || option.energyIndex === null)
+      && (option.toolIndex === undefined || option.toolIndex === null)
+    )
+  ) {
+    return null;
+  }
+  const playerIndex = option.playerIndex ?? current.yourIndex;
+  const player = current.players[playerIndex];
+  if (!player) {
+    return null;
+  }
+  const pokemon = area === CabtAreaType.ACTIVE ? player.active[index] : player.bench[index];
+  if (!pokemon) {
+    return null;
+  }
+  return {
+    playerIndex,
+    slot: area === CabtAreaType.ACTIVE ? 'active' as const : 'bench' as const,
+    index,
+    pokemon,
+  };
 }
 
 function attachedCardForOption(pokemonCard: CabtPokemon | null | undefined, option: CabtOption) {

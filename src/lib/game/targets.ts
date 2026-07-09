@@ -56,6 +56,15 @@ function getPromptTargets(
   prompt: PromptView,
   blockedOption: 'blocked' | 'blockedFrom' | 'blockedTo',
 ): Array<{ player: GameView['players'][number]; slot: PokemonSlotView; target: CardTarget }> {
+  if (Array.isArray(prompt.fields.targets)) {
+    return (prompt.fields.targets as CardTarget[])
+      .map((target) => {
+        const player = current.players[playerIndexForPromptTarget(prompt, target)];
+        const slot = slotForPromptTarget(player, target);
+        return player && slot && !slot.empty ? { player, slot, target } : null;
+      })
+      .filter((item): item is { player: GameView['players'][number]; slot: PokemonSlotView; target: CardTarget } => !!item);
+  }
   const playerType = Number(prompt.fields.playerType ?? PlayerType.ANY);
   const slots = Array.isArray(prompt.fields.slots)
     ? (prompt.fields.slots as number[])
@@ -88,6 +97,29 @@ function getPromptTargets(
   }
 
   return result;
+}
+
+function playerIndexForPromptTarget(prompt: PromptView, target: CardTarget) {
+  if (target.player === PlayerType.BOTTOM_PLAYER) {
+    return prompt.playerIndex;
+  }
+  if (target.player === PlayerType.TOP_PLAYER) {
+    return prompt.playerIndex === 0 ? 1 : 0;
+  }
+  return prompt.playerIndex;
+}
+
+function slotForPromptTarget(player: GameView['players'][number] | undefined, target: CardTarget) {
+  if (!player) {
+    return undefined;
+  }
+  if (target.slot === SlotType.ACTIVE) {
+    return player.active;
+  }
+  if (target.slot === SlotType.BENCH) {
+    return player.bench.find((slot) => slot.index === target.index);
+  }
+  return undefined;
 }
 
 function promptOptions(prompt: PromptView): Record<string, unknown> {

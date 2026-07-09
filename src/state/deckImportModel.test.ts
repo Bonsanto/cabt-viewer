@@ -22,4 +22,19 @@ describe('deck import model', () => {
       expect(decks.error).toContain('AI opponent deck: Deck is empty.');
     }
   });
+
+  it('rejects deck cards that the local CABT card table cannot resolve', () => {
+    const opponentDeck = SAMPLE_DECK.replace(
+      '35 Basic {W} Energy SVE 3',
+      '34 Basic {W} Energy SVE 3\n1 Crushing Hammer POR 71',
+    );
+    const decks = parseLocalGameDecks(SAMPLE_DECK, opponentDeck);
+
+    expect(decks.ok).toBe(false);
+    if (!decks.ok) {
+      expect(decks.error).toContain('AI opponent deck: Line ');
+      expect(decks.error).toContain('could not resolve "1 Crushing Hammer POR 71"');
+      expect(decks.error).toContain('Supported prints: Crushing Hammer SVI 168');
+    }
+  });
 });

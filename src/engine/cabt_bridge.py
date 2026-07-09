@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 
 FRONTEND_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = FRONTEND_ROOT.parent
 SAMPLE_SUBMISSION = Path(
     os.environ.get(
         "CABT_SAMPLE_SUBMISSION_DIR",
@@ -23,6 +24,7 @@ from cg.game import battle_finish, battle_select, battle_start  # noqa: E402
 
 
 AgentFn = Callable[[dict[str, Any]], list[int]]
+MAX_AUTO_STEPS = 10000
 
 
 def to_jsonable(value: Any) -> Any:
@@ -82,12 +84,20 @@ def load_agent(agent_path: str | None) -> AgentFn:
 class Session:
     def __init__(self) -> None:
         self.obs: dict[str, Any] | None = None
-        self.agent: AgentFn = first_legal_agent
+        self.agents: list[AgentFn] = [first_legal_agent, first_legal_agent]
+        self.agent_controlled = [False, True]
         self.active = False
 
-    def start(self, deck0: list[int], deck1: list[int], agent_path: str | None) -> dict[str, Any]:
+    def start(
+        self,
+        deck0: list[int],
+        deck1: list[int],
+        agent_paths: list[str | None],
+        agent_controlled: list[bool],
+    ) -> dict[str, Any]:
         self.close()
-        self.agent = load_agent(agent_path)
+        self.agent_controlled = normalize_agent_controlled(agent_controlled)
+        self.agents = [load_agent(path) for path in normalize_agent_paths(agent_paths)]
         obs, start_data = battle_start(deck0, deck1)
         if obs is None or not start_data.battlePtr:
             return {
@@ -100,37 +110,42 @@ class Session:
 
         self.obs = obs
         self.active = True
-        self.play_ai_turns()
-        return self.snapshot()
+        auto_steps = self.play_ai_turns()
+        return self.snapshot([obs, *auto_steps])
 
     def select(self, selection: list[int]) -> dict[str, Any]:
         if not self.active:
             raise RuntimeError("No active CABT battle.")
-        self.obs = battle_select(selection)
-        self.play_ai_turns()
-        return self.snapshot()
+        selected_step = battle_select(selection)
+        self.obs = selected_step
+        auto_steps = self.play_ai_turns()
+        return self.snapshot([selected_step, *auto_steps])
 
     def state(self) -> dict[str, Any]:
         return self.snapshot()
 
-    def play_ai_turns(self) -> None:
-        for _ in range(200):
+    def play_ai_turns(self) -> list[dict[str, Any]]:
+        auto_steps: list[dict[str, Any]] = []
+        for _ in range(MAX_AUTO_STEPS):
             if not self.obs:
-                return
+                return auto_steps
             current = self.obs.get("current")
             select = self.obs.get("select")
             if not current or current.get("result", -1) >= 0 or select is None:
-                return
-            if current.get("yourIndex") != 1:
-                return
-            action = self.agent(self.obs)
+                return auto_steps
+            player_index = current.get("yourIndex")
+            if player_index not in (0, 1) or not self.agent_controlled[player_index]:
+                return auto_steps
+            action = self.agents[player_index](self.obs)
             self.obs = battle_select(action)
-        raise RuntimeError("AI turn limit exceeded.")
+            auto_steps.append(self.obs)
+        raise RuntimeError(f"AI auto-play limit exceeded ({MAX_AUTO_STEPS} selections).")
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, auto_steps: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         return {
             "ok": True,
             "observation": self.obs,
+            "autoSteps": auto_steps or [],
             "cards": [to_jsonable(card) for card in all_card_data()],
             "attacks": [to_jsonable(attack) for attack in all_attack()],
         }
@@ -142,13 +157,43 @@ class Session:
             except Exception:
                 pass
         self.obs = None
+        self.agent_controlled = [False, True]
         self.active = False
+
+
+def normalize_agent_paths(agent_paths: Any) -> list[str | None]:
+    if not isinstance(agent_paths, list):
+        return [None, None]
+    return [
+        agent_paths[0] if len(agent_paths) > 0 and isinstance(agent_paths[0], str) else None,
+        agent_paths[1] if len(agent_paths) > 1 and isinstance(agent_paths[1], str) else None,
+    ]
+
+
+def normalize_agent_controlled(agent_controlled: Any) -> list[bool]:
+    if not isinstance(agent_controlled, list):
+        return [False, True]
+    return [
+        bool(agent_controlled[0]) if len(agent_controlled) > 0 else False,
+        bool(agent_controlled[1]) if len(agent_controlled) > 1 else True,
+    ]
 
 
 def handle(session: Session, message: dict[str, Any]) -> dict[str, Any]:
     command = message.get("command")
     if command == "start":
-        return session.start(message["deck0"], message["deck1"], message.get("agentPath"))
+        agent_paths = message.get("agentPaths")
+        agent_controlled = message.get("agentControlled")
+        if not isinstance(agent_paths, list):
+            agent_paths = [None, message.get("agentPath")]
+        if not isinstance(agent_controlled, list):
+            agent_controlled = [False, not bool(message.get("manualOpponent"))]
+        return session.start(
+            message["deck0"],
+            message["deck1"],
+            agent_paths,
+            agent_controlled,
+        )
     if command == "select":
         return session.select(message["selection"])
     if command == "state":

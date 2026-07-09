@@ -50,6 +50,7 @@
   let maxAttachAssignments = $derived(normalizeLimit(promptOptions(prompt).max, attachCards.length || 1));
   let attachBlockedIndexes = $derived(new Set<number>(promptBlockedIndexes(prompt)));
   let promptStrategy = $derived(createStrategy());
+  let showPromptHpBadges = $derived(promptStrategy?.iconName === 'damage');
   let topActiveSlot = $derived(previewAttachEnergySlot(topPlayer.active, attachPrompt(), attachAssignments, attachCards));
   let bottomActiveSlot = $derived(previewAttachEnergySlot(bottomPlayer.active, attachPrompt(), attachAssignments, attachCards));
   let topBenchSlots = $derived(topPlayer.bench
@@ -312,6 +313,7 @@
       isPlayableTarget={() => false}
       {isBoardPromptSelectable}
       {isBoardPromptSelected}
+      {showPromptHpBadges}
       {boardSlotDelta}
       {clickSlot}
       {allowDrop}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import CardTile from './CardTile.svelte';
-  import { energyIconSrc, pokemonTypeIconSrc, pokemonTypeLabelFor } from '../game/energyIcons';
+  import { energyIconSrc, energyIconType, pokemonTypeIconSrc, pokemonTypeLabelFor } from '../game/energyIcons';
+  import { remainingHp } from '../game/hpDisplay';
   import type { PokemonSlotView } from '../game/types';
 
   type Props = {
@@ -9,6 +10,7 @@
     canDrop?: boolean;
     promptSelectable?: boolean;
     promptSelected?: boolean;
+    promptHpVisible?: boolean;
     slotDelta?: number;
     placement?: '' | 'top-active-slot' | 'bottom-active-slot';
     onclick?: (event: MouseEvent) => void;
@@ -22,6 +24,7 @@
     canDrop = false,
     promptSelectable = false,
     promptSelected = false,
+    promptHpVisible = false,
     slotDelta = 0,
     placement = '',
     onclick,
@@ -43,6 +46,11 @@
   let failedToolImageUrl = $state('');
   let lastToolImageUrl = $state<string | undefined>();
   let showToolImage = $derived(!!toolPreviewImageUrl && failedToolImageUrl !== toolPreviewImageUrl);
+  let energyTitle = $derived(attachedEnergyTitle());
+  let currentRemainingHp = $derived(remainingHp(displayHp, slot.damage));
+  let projectedRemainingHp = $derived(remainingHp(displayHp, slot.damage, slotDelta));
+  let showPromptHpBadge = $derived(promptHpVisible && (promptSelectable || promptSelected || slotDelta !== 0) && !!displayHp && !slot.empty);
+  let projectedHpTitle = $derived(slotDelta < 0 ? 'after queued damage removal' : 'after queued damage');
 
   $effect(() => {
     if (toolPreviewImageUrl !== lastToolImageUrl) {
@@ -63,6 +71,18 @@
 
   function hasPendingAttach(card: { pendingAttach?: unknown }) {
     return card.pendingAttach === true;
+  }
+
+  function energyTypeClass(card: { name?: string; fullName?: string; energyType?: string | number }) {
+    return `energy-${energyIconType(card) ?? 'unknown'}`;
+  }
+
+  function attachedEnergyTitle() {
+    if (!slot.energy.length) {
+      return '';
+    }
+    const names = slot.energy.map((energy) => energy.fullName || energy.name || 'Energy');
+    return `${slot.energy.length} attached energy: ${names.join(', ')}`;
   }
 
   function pokemonHp(card: { hp?: unknown } | undefined) {
@@ -93,6 +113,24 @@
     </div>
   {/if}
 
+  {#if showPromptHpBadge}
+    <div
+      class="prompt-hp-badge"
+      class:changed={slotDelta !== 0}
+      class:knockout={projectedRemainingHp === 0}
+      title={slotDelta === 0
+        ? `${currentRemainingHp}/${displayHp} HP remaining`
+        : `${currentRemainingHp}/${displayHp} HP remaining, ${projectedRemainingHp}/${displayHp} ${projectedHpTitle}`}
+    >
+      <span>HP</span>
+      <strong>{currentRemainingHp}</strong>
+      {#if slotDelta !== 0}
+        <span>-></span>
+        <strong>{projectedRemainingHp}</strong>
+      {/if}
+    </div>
+  {/if}
+
   {#if slot.pokemon}
     <CardTile card={slot.pokemon} damage={slot.damage} />
     {#if displayHp || pokemonTypeIcon}
@@ -113,15 +151,22 @@
       </div>
     {/if}
     {#if slot.energy.length}
-      <div class="energy-badges" class:stacked-energy={stackedEnergy} title={`${slot.energy.length} attached energy`}>
-        {#each slot.energy as energy, energyIndex}
-          <img
-            src={energyIconSrc(energy)}
-            alt={energy.name || 'Energy'}
-            class:pending-energy={hasPendingAttach(energy)}
-            style={energyStackStyle(energyIndex)}
-          />
-        {/each}
+      <div class="energy-rail" class:stacked-energy={stackedEnergy} title={energyTitle} aria-label={energyTitle}>
+        <span class="energy-count" aria-hidden="true">{slot.energy.length}<span>E</span></span>
+        <span class="energy-icon-row">
+          {#each slot.energy as energy, energyIndex}
+            <span
+              class={`energy-icon-shell ${energyTypeClass(energy)}`}
+              class:pending-energy={hasPendingAttach(energy)}
+              style={energyStackStyle(energyIndex)}
+            >
+              <img
+                src={energyIconSrc(energy)}
+                alt={energy.name || 'Energy'}
+              />
+            </span>
+          {/each}
+        </span>
       </div>
     {/if}
     {#if slot.tools.length}
@@ -230,6 +275,57 @@
     box-shadow: 0 8px 18px rgba(15, 60, 49, 0.32);
   }
 
+  .prompt-hp-badge {
+    position: absolute;
+    top: calc(var(--slot-card-w) * 0.025);
+    left: calc(var(--slot-card-w) * 0.025);
+    z-index: 9;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(2px, calc(var(--slot-card-w) * 0.022), 4px);
+    min-width: clamp(42px, calc(var(--slot-card-w) * 0.5), 76px);
+    min-height: clamp(20px, calc(var(--slot-card-w) * 0.2), 30px);
+    padding: clamp(2px, calc(var(--slot-card-w) * 0.025), 4px) clamp(5px, calc(var(--slot-card-w) * 0.055), 9px);
+    border: 1px solid rgba(219, 234, 254, 0.82);
+    border-radius: var(--radius-pill);
+    background: rgba(15, 23, 42, 0.92);
+    box-shadow:
+      0 8px 16px rgba(15, 23, 42, 0.34),
+      0 0 0 1px rgba(96, 165, 250, 0.2);
+    color: #e0f2fe;
+    font-size: clamp(10px, calc(var(--slot-card-w) * 0.092), 14px);
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: 0;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .prompt-hp-badge span {
+    color: #bfdbfe;
+    font-size: 0.72em;
+    font-weight: 900;
+  }
+
+  .prompt-hp-badge strong {
+    color: #f8fafc;
+    font-weight: 950;
+  }
+
+  .prompt-hp-badge.changed {
+    border-color: rgba(253, 186, 116, 0.92);
+    background: rgba(67, 20, 7, 0.92);
+    box-shadow:
+      0 8px 16px rgba(67, 20, 7, 0.34),
+      0 0 0 1px rgba(251, 146, 60, 0.28);
+  }
+
+  .prompt-hp-badge.knockout {
+    border-color: rgba(252, 165, 165, 0.96);
+    background: rgba(69, 10, 10, 0.94);
+  }
+
   .empty-zone {
     width: 100%;
     height: 100%;
@@ -306,39 +402,128 @@
     filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.28));
   }
 
-  .energy-badges {
+  .energy-rail {
     --energy-gap: clamp(2px, calc(var(--slot-card-w) * 0.018), 3px);
-    --energy-icon-size: calc((var(--slot-card-w) - (var(--energy-gap) * 3)) / 4);
+    --energy-icon-size: clamp(13px, calc(var(--slot-card-w) * 0.16), 22px);
     position: absolute;
-    left: 0;
-    bottom: calc(var(--slot-card-w) * -0.095);
-    z-index: 5;
-    width: 100%;
-    min-height: var(--energy-icon-size);
+    left: 50%;
+    bottom: calc(var(--slot-card-w) * -0.115);
+    z-index: 8;
+    width: calc(100% + 8px);
+    min-height: calc(var(--energy-icon-size) + 5px);
+    padding: 2px 4px 2px 3px;
+    border: 1px solid rgba(241, 245, 249, 0.72);
+    border-radius: 999px;
+    background: rgba(17, 24, 39, 0.88);
+    box-shadow:
+      0 5px 12px rgba(15, 23, 42, 0.36),
+      inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    color: #f8fafc;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: var(--energy-gap);
+    transform: translateX(-50%);
     pointer-events: none;
   }
 
-  .energy-badges img {
+  .energy-rail::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -6px;
+    width: 2px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(248, 250, 252, 0.82);
+    transform: translateX(-50%);
+  }
+
+  .board-slot.prompt-selectable .energy-rail,
+  .board-slot.prompt-selected .energy-rail {
+    border-color: rgba(167, 243, 208, 0.95);
+    background: rgba(6, 78, 59, 0.92);
+    box-shadow:
+      0 0 0 1px rgba(167, 243, 208, 0.36),
+      0 8px 16px rgba(4, 47, 46, 0.38);
+  }
+
+  .energy-count {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 1px;
+    min-width: clamp(20px, calc(var(--slot-card-w) * 0.2), 28px);
+    justify-content: center;
+    font-size: clamp(11px, calc(var(--slot-card-w) * 0.12), 16px);
+    font-weight: 950;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+
+  .energy-count span {
+    font-size: 0.68em;
+    font-weight: 900;
+    opacity: 0.82;
+  }
+
+  .energy-icon-row {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--energy-gap);
+  }
+
+  .energy-icon-shell {
+    position: relative;
     flex: 0 0 var(--energy-icon-size);
     width: var(--energy-icon-size);
     height: var(--energy-icon-size);
+    display: inline-grid;
+    place-items: center;
     border-radius: 999px;
-    object-fit: contain;
-    filter: drop-shadow(0 3px 4px rgba(23, 30, 38, 0.38));
   }
 
-  .energy-badges img.pending-energy {
+  .energy-icon-shell.energy-darkness::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    border-radius: 999px;
+    border: 1.5px solid rgba(255, 255, 255, 0.96);
+    box-shadow:
+      inset 0 0 0 1px rgba(15, 23, 42, 0.48),
+      0 0 0 1px rgba(255, 255, 255, 0.42),
+      0 0 6px rgba(255, 255, 255, 0.58);
+    pointer-events: none;
+  }
+
+  .energy-rail img {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    border-radius: 999px;
+    object-fit: contain;
+    filter:
+      drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45))
+      drop-shadow(0 3px 4px rgba(23, 30, 38, 0.32));
+  }
+
+  .energy-icon-shell.pending-energy {
     opacity: 0.5;
   }
 
-  .energy-badges.stacked-energy {
+  .energy-rail.stacked-energy .energy-icon-row {
+    min-width: calc(var(--energy-icon-size) * 2.7);
+    height: var(--energy-icon-size);
     display: block;
   }
 
-  .energy-badges.stacked-energy img {
+  .energy-rail.stacked-energy .energy-icon-shell {
     position: absolute;
     left: var(--energy-offset);
     bottom: 0;

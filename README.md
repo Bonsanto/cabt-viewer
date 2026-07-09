@@ -57,7 +57,9 @@ sample_submission/
     cg.dll
 ```
 
-Point the bridge at that directory:
+If the Kaggle data is extracted to `~/Downloads/pokemon-tcg-ai-battle`,
+the bridge detects `sample_submission` automatically. Otherwise, point the
+bridge at that directory:
 
 ```bash
 export CABT_SAMPLE_SUBMISSION_DIR=/absolute/path/to/sample_submission
@@ -87,6 +89,61 @@ the replay viewer or set `CABT_ENGINE_MODE=demo` before running `npm run dev`.
 
 Dev servers bind to `127.0.0.1` by default. To test from another device on your
 LAN, run `npm run dev:lan`.
+
+## Record Private Human Traces
+
+Local play writes full human decision traces by default. From a sibling checkout
+under `Projects/`, traces are saved to:
+
+```text
+../ptcg-kaggle/private/traces/cabt-<session>.jsonl
+```
+
+Each trace contains the pre-action CABT observation, legal select options, and
+the chosen option indexes. Keep these files private; they may contain
+competition data and full game state.
+
+Useful environment variables:
+
+```bash
+export CABT_SAMPLE_SUBMISSION_DIR=/absolute/path/to/sample_submission
+export CABT_TRACE_DIR=/absolute/path/to/ptcg-kaggle/private/traces
+export CABT_TRACE_REVIEWER=local-reviewer
+npm run dev
+```
+
+Set `CABT_TRACE_ENABLED=0` to disable trace writing.
+`CABT_TRACE_DIR` must point under a `private/` or `outputs/` directory.
+`CABT_TRACE_TRUST` must be one of `gold`, `silver`, `bronze`, `debug`, or
+`unreliable`; invalid values fall back to `silver`.
+
+Validate a trace from the Kaggle project:
+
+```bash
+cd /absolute/path/to/ptcg-kaggle
+python3 scripts/human_trace_schema.py private/traces/<trace-file>.jsonl
+```
+
+## Private Local Agent Presets
+
+Competition-derived or personally inferred deck presets should stay under the
+git-ignored `private/agents/` tree, not `public/agents/`. The local engine
+exposes that private catalog only on loopback at `/local-engine/private-agents`
+so it can appear in the CABT Viewer selectors during local practice.
+
+Example structure:
+
+```text
+private/agents/
+  agents.json
+  <agent-id>/
+    deck.csv
+    main.py
+```
+
+Use `deckUrl` values like
+`/local-engine/private-agents/<agent-id>/deck.csv` and `path` values like
+`private/agents/<agent-id>/main.py`.
 
 ## Regenerate CABT Metadata
 

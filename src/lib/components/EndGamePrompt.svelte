@@ -2,10 +2,40 @@
   type Props = {
     resultLabel: string;
     turn: number;
+    traceTrust: string;
+    traceConfidence: number;
+    traceNote: string;
+    traceTags: string;
+    traceTagBusy?: boolean;
+    traceTagMessage?: string;
+    traceTagError?: string;
+    onsaveTraceTag: () => void;
     onconfirm: () => void;
+    onsave?: () => void;
+    saveDisabled?: boolean;
+    saveMessage?: string;
+    saveError?: string;
+    saving?: boolean;
   };
 
-  let { resultLabel, turn, onconfirm }: Props = $props();
+  let {
+    resultLabel,
+    turn,
+    traceTrust = $bindable(),
+    traceConfidence = $bindable(),
+    traceNote = $bindable(),
+    traceTags = $bindable(),
+    traceTagBusy = false,
+    traceTagMessage = '',
+    traceTagError = '',
+    onsaveTraceTag,
+    onconfirm,
+    onsave,
+    saveDisabled = false,
+    saveMessage = '',
+    saveError = '',
+    saving = false,
+  }: Props = $props();
 </script>
 
 <div class="end-game-overlay" role="dialog" aria-modal="true" aria-labelledby="end-game-title">
@@ -15,7 +45,56 @@
       <h2 id="end-game-title">{resultLabel}</h2>
       <p>Finished on turn {turn}</p>
     </div>
-    <button type="button" onclick={onconfirm}>Back to main screen</button>
+    <section class="trace-tag-panel" aria-label="Trace annotation">
+      <div class="trace-grid">
+        <label>
+          Trust
+          <select bind:value={traceTrust}>
+            <option value="gold">gold</option>
+            <option value="silver">silver</option>
+            <option value="bronze">bronze</option>
+            <option value="debug">debug</option>
+            <option value="unreliable">unreliable</option>
+          </select>
+        </label>
+        <label>
+          Confidence
+          <input bind:value={traceConfidence} min="1" max="5" type="number" />
+        </label>
+      </div>
+      <label>
+        Note
+        <input bind:value={traceNote} placeholder="mirror_second_perfect_win" spellcheck="false" />
+      </label>
+      <label>
+        Tags
+        <input bind:value={traceTags} placeholder="mirror,perfect" spellcheck="false" />
+      </label>
+      <div class="trace-actions">
+        <button type="button" class="secondary" disabled={traceTagBusy} onclick={onsaveTraceTag}>
+          {traceTagBusy ? 'Saving...' : 'Save trace tag'}
+        </button>
+        {#if traceTagMessage}
+          <small class="success">{traceTagMessage}</small>
+        {:else if traceTagError}
+          <small class="error">{traceTagError}</small>
+        {/if}
+      </div>
+    </section>
+
+    <div class="actions">
+      {#if onsave}
+        <button class="secondary" type="button" onclick={onsave} disabled={saveDisabled || saving}>
+          {saving ? 'Saving...' : saveMessage ? 'Saved' : 'Save match'}
+        </button>
+      {/if}
+      <button type="button" onclick={onconfirm}>Back to main screen</button>
+    </div>
+    {#if saveMessage}
+      <p class="save-status" role="status">{saveMessage}</p>
+    {:else if saveError}
+      <p class="save-status error" role="alert">{saveError}</p>
+    {/if}
   </section>
 </div>
 
@@ -32,7 +111,7 @@
   }
 
   .end-game-panel {
-    width: min(420px, calc(100vw - 48px));
+    width: min(560px, calc(100vw - 48px));
     display: grid;
     gap: 18px;
     padding: 20px;
@@ -65,6 +144,71 @@
     font-size: 14px;
   }
 
+  .trace-tag-panel {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--surface-inset-border);
+    background: var(--surface-inset-bg);
+  }
+
+  .trace-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 112px;
+    gap: 10px;
+  }
+
+  .trace-tag-panel label {
+    display: grid;
+    gap: 6px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .trace-tag-panel select,
+  .trace-tag-panel input {
+    width: 100%;
+    min-height: 36px;
+    border-radius: 5px;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    color: var(--input-text);
+    padding: 0 10px;
+    font: inherit;
+  }
+
+  .trace-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+  }
+
+  .trace-actions small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .trace-actions .success {
+    color: var(--accent-strong);
+  }
+
+  .trace-actions .error {
+    color: var(--danger-strong);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
   .end-game-panel button {
     justify-self: start;
     border-radius: 5px;
@@ -75,9 +219,35 @@
     font-weight: 900;
   }
 
+  .end-game-panel button.secondary {
+    border-color: var(--button-border);
+    background: var(--button-bg);
+  }
+
+  .end-game-panel button:disabled {
+    cursor: wait;
+    opacity: 0.6;
+  }
+
   .end-game-panel button:hover,
   .end-game-panel button:focus-visible {
     border-color: var(--accent-strong);
     background: var(--accent-tint);
+  }
+
+  .save-status {
+    margin: -6px 0 0;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .save-status.error {
+    color: var(--danger-text);
+  }
+
+  @media (max-width: 560px) {
+    .trace-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

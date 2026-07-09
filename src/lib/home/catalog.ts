@@ -27,7 +27,25 @@ export async function loadAgentOptions(): Promise<AgentOption[]> {
 }
 
 export async function loadGameLogs(): Promise<GameLogEntry[]> {
-  return loadJsonList<GameLogEntry>('/game-logs/logs.json', 'logs');
+  // Tracked demo fixtures live in logs.json; private locally-recorded matches
+  // live in the git-ignored local-logs.json. Merge both, locals first, deduped
+  // by id. A missing local manifest 404s to [] and is harmless.
+  const [demos, locals] = await Promise.all([
+    loadJsonList<GameLogEntry>('/game-logs/logs.json', 'logs'),
+    // The local manifest is best-effort: a corrupt or malformed local-logs.json
+    // must not break the tracked demo catalog.
+    loadJsonList<GameLogEntry>('/game-logs/local-logs.json', 'logs').catch(() => []),
+  ]);
+  const merged: GameLogEntry[] = [];
+  const seen = new Set<string>();
+  for (const entry of [...locals, ...demos]) {
+    if (seen.has(entry.id)) {
+      continue;
+    }
+    seen.add(entry.id);
+    merged.push(entry);
+  }
+  return merged;
 }
 
 async function loadJsonList<T extends { id?: unknown }>(url: string, key: string): Promise<T[]> {

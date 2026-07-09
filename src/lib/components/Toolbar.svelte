@@ -12,10 +12,13 @@
     autoConfirmPrompts: boolean;
     debugZones: boolean;
     showLogs: boolean;
+    animateActions: boolean;
+    actionStepDelayMs: number;
     themePreference: ThemePreference;
     busy?: boolean;
     promptActive?: boolean;
     gameFinished?: boolean;
+    canConcede?: boolean;
     error?: string;
     resetPerspective: () => void;
     passTurn: () => void;
@@ -35,10 +38,13 @@
     autoConfirmPrompts = $bindable(),
     debugZones = $bindable(),
     showLogs = $bindable(),
+    animateActions = $bindable(),
+    actionStepDelayMs = $bindable(),
     themePreference = $bindable(),
     busy = false,
     promptActive = false,
     gameFinished = false,
+    canConcede = true,
     error = '',
     resetPerspective,
     passTurn,
@@ -75,6 +81,22 @@
     Show logs
   </label>
   <label>
+    <input type="checkbox" bind:checked={animateActions} />
+    Step playback
+  </label>
+  <label>
+    Step ms
+    <input
+      class="compact-number"
+      type="number"
+      min="50"
+      max="2500"
+      step="50"
+      bind:value={actionStepDelayMs}
+      disabled={!animateActions}
+    />
+  </label>
+  <label>
     Theme
     <select bind:value={themePreference} aria-label="Theme preference">
       <option value="system">System</option>
@@ -84,7 +106,14 @@
   </label>
   <div class="sidebar-turn-actions">
     <button disabled={busy || promptActive || gameFinished} onclick={passTurn}>Pass turn</button>
-    <button class="danger" disabled={busy || promptActive || gameFinished} onclick={concede}>Concede</button>
+    <button
+      class="danger"
+      disabled={busy || promptActive || gameFinished || !canConcede}
+      title={!canConcede ? 'Concede is unavailable in CABT-native games.' : undefined}
+      onclick={concede}
+    >
+      Concede
+    </button>
   </div>
   <button disabled={switchDisabled} onclick={switchSides}>Switch sides</button>
   <button onclick={resetGame}>{resetLabel}</button>
@@ -133,6 +162,17 @@
     color: var(--button-text);
     font-size: 10px;
     font-weight: 700;
+  }
+
+  .table-toolbar input.compact-number {
+    min-width: 0;
+    width: 58px;
+    padding: 2px 4px;
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    background: var(--input-bg);
+    color: var(--input-text);
+    font: inherit;
   }
 
   .sidebar-turn-actions {

@@ -38,6 +38,8 @@ export type CardView = {
   retreat?: unknown[];
   attacks?: AttackView[];
   powers?: PowerView[];
+  promptLabel?: string;
+  promptSubLabel?: string;
 };
 
 export type AttackView = {
@@ -134,6 +136,14 @@ export type LogView = {
   client?: number;
 };
 
+export type ActionTimelineEvent = {
+  id: number;
+  message: string;
+  playerIndex?: number;
+  kind?: string;
+  params?: unknown;
+};
+
 export type GameView = {
   ready: boolean;
   phase: number;
@@ -145,12 +155,17 @@ export type GameView = {
   players: PlayerView[];
   prompts: PromptView[];
   logs: LogView[];
+  actionTimeline?: ActionTimelineEvent[];
   events: unknown[];
+  capabilities?: {
+    concede?: boolean;
+  };
 };
 
 export type EngineOk = {
   ok: true;
   view: GameView;
+  sequence?: GameView[];
   sessionId?: string;
 };
 
