@@ -1,18 +1,6 @@
 {
   "agents": [
     {
-      "id": "first-legal",
-      "name": "First legal option",
-      "description": "Uses the first legal CABT selection whenever the local engine controls the opponent."
-    },
-    {
-      "id": "official-random-abomasnow",
-      "name": "Official random sample (Mega Abomasnow)",
-      "description": "Kaggle sample-submission policy: chooses a random legal option with the bundled Mega Abomasnow ex deck.",
-      "path": "public/agents/official-random-abomasnow/main.py",
-      "deckUrl": "/agents/official-random-abomasnow/deck.csv"
-    },
-    {
       "id": "mega-lucario-ex",
       "name": "Rule-based Mega Lucario ex",
       "description": "Kaggle notebook sample: rule-based Mega Lucario ex deck that pivots between Lucario, Hariyama, and Solrock.",
@@ -25,6 +13,13 @@
       "description": "Kaggle notebook sample: rule-based Dragapult ex deck focused on early setup and Phantom Dive pressure.",
       "path": "public/agents/dragapult-ex/main.py",
       "deckUrl": "/agents/dragapult-ex/deck.csv"
+    },
+    {
+      "id": "alakazam",
+      "name": "Heuristic Alakazam",
+      "description": "Alakazam ex deck played by the v6 heuristic scorer.",
+      "path": "public/agents/alakazam/main.py",
+      "deckUrl": "/agents/alakazam/deck.csv"
     }
   ]
 }

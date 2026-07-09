@@ -124,6 +124,27 @@ cd /absolute/path/to/ptcg-kaggle
 python3 scripts/human_trace_schema.py private/traces/<trace-file>.jsonl
 ```
 
+## Private Local Agent Presets
+
+Competition-derived or personally inferred deck presets should stay under the
+git-ignored `private/agents/` tree, not `public/agents/`. The local engine
+exposes that private catalog only on loopback at `/local-engine/private-agents`
+so it can appear in the CABT Viewer selectors during local practice.
+
+Example structure:
+
+```text
+private/agents/
+  agents.json
+  <agent-id>/
+    deck.csv
+    main.py
+```
+
+Use `deckUrl` values like
+`/local-engine/private-agents/<agent-id>/deck.csv` and `path` values like
+`private/agents/<agent-id>/main.py`.
+
 ## Regenerate CABT Metadata
 
 Generated metadata is committed in `src/lib/cabt` so a fresh clone can show
